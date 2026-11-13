@@ -1,0 +1,49 @@
+{
+  "name": "openqq",
+  "version": "0.1.0",
+  "description": "OneBot v11 bridge for Windows QQ NT via Frida N-API instrumentation",
+  "keywords": [
+    "onebot",
+    "onebot-v11",
+    "qq",
+    "qqnt",
+    "frida",
+    "bot"
+  ],
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/feijx3/OpenQQ.git"
+  },
+  "homepage": "https://github.com/feijx3/OpenQQ#readme",
+  "bugs": {
+    "url": "https://github.com/feijx3/OpenQQ/issues"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node ui/build.mjs",
+    "prestart": "npm run build",
+    "prewebui": "npm run build",
+    "init": "node src/main.mjs init",
+    "bot": "node examples/bot.mjs",
+    "doctor": "node src/main.mjs doctor",
+    "start": "node src/main.mjs start",
+    "webui": "node src/main.mjs webui",
+    "pretest": "npm run build",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6.3.4",
+    "antd": "^6.7.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

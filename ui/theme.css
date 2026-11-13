@@ -1,0 +1,81 @@
+/* OpenQQ design tokens. Served as /theme.css and linked before /styles.css. */
+:root {
+  color-scheme: light;
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --text: #18181b;
+  --text-2: #52525b;
+  --text-3: #a1a1aa;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-soft: rgba(37, 99, 235, .08);
+  --accent-contrast: #ffffff;
+  --success: #16a34a;
+  --warning: #ca8a04;
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, .08);
+  --shadow: 0 1px 2px rgba(24, 24, 27, .04);
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 24px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --gutter: 24px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #09090b;
+    --surface: #111113;
+    --surface-2: #1c1c1f;
+    --border: #27272a;
+    --border-strong: #3f3f46;
+    --text: #fafafa;
+    --text-2: #a1a1aa;
+    --text-3: #71717a;
+    --accent: #3b82f6;
+    --accent-hover: #60a5fa;
+    --accent-soft: rgba(59, 130, 246, .14);
+    --success: #4ade80;
+    --warning: #facc15;
+    --danger: #f87171;
+    --danger-soft: rgba(248, 113, 113, .12);
+    --shadow: none;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #09090b;
+  --surface: #111113;
+  --surface-2: #1c1c1f;
+  --border: #27272a;
+  --border-strong: #3f3f46;
+  --text: #fafafa;
+  --text-2: #a1a1aa;
+  --text-3: #71717a;
+  --accent: #3b82f6;
+  --accent-hover: #60a5fa;
+  --accent-soft: rgba(59, 130, 246, .14);
+  --success: #4ade80;
+  --warning: #facc15;
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, .12);
+  --shadow: none;
+}
+
+@media (max-width: 640px) {
+  :root { --gutter: 16px; }
+}
+
+html, body { margin: 0; background: var(--bg); color: var(--text); }
