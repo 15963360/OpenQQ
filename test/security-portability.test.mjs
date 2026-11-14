@@ -250,7 +250,7 @@ test('WebUI serves theme.css, POST /api/check and updated custom SVG UI without 
 
     const forbidden = /DeobfTools|Asia\/Singapore|连接，从这里开始|你的 OpenQQ，准备好了|设置助理|D:\\\\qq/;
     // web/ is built from ui/ (npm run build); scan both the shipped files and their sources.
-    for (const file of ['web/index.html', 'web/setup.html', 'web/app.js', 'web/app.css', 'web/theme.css', ...readdirSync('ui').map(name => 'ui/' + name)]) {
+    for (const file of ['web/index.html', 'web/setup.html', 'web/app.js', 'web/app.css', 'web/theme.css', ...readdirSync('ui', { recursive: true, withFileTypes: true }).filter(item => item.isFile()).map(item => item.parentPath + '/' + item.name)]) {
       const content = readFileSync(file, 'utf8');
       assert.equal(forbidden.test(content), false, `${file} contains personal or AI copy`);
     }

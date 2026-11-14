@@ -116,3 +116,23 @@ test('reconnecting streams replay bounded history and server shutdown closes liv
   assert.equal((await resumed()).data.entries.length, 2);
   await web.close();
 });
+
+test('console routes serve the page, fonts are local and /api/metrics reports throughput and action latency', async t => {
+  const { web, headers } = await fixture(t);
+  for (const path of ['/messages', '/events', '/actions', '/logs', '/account', '/connections', '/settings']) {
+    const response = await fetch(web.origin + path);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /^text\/html/);
+  }
+  assert.equal((await fetch(web.origin + '/fonts/inter.woff2')).headers.get('content-type'), 'font/woff2');
+  assert.equal((await fetch(web.origin + '/api/metrics')).status, 401);
+  web.publish('event', { post_type: 'message', user_id: 1 });
+  web.publish('action', { request: { action: 'get_status' }, response: { status: 'ok' }, source: 'webui', elapsed: 12 });
+  web.publish('action', { request: { action: 'get_status' }, response: { status: 'failed' }, source: 'onebot', elapsed: 30 });
+  const metrics = await (await fetch(web.origin + '/api/metrics', { headers })).json();
+  assert.equal(metrics.timeline.length, 60);
+  const total = key => metrics.timeline.reduce((sum, bucket) => sum + bucket[key], 0);
+  assert.deepEqual([total('events'), total('actions'), total('errors')], [1, 2, 1]);
+  assert.deepEqual([metrics.latency.samples, metrics.latency.average, metrics.latency.last], [2, 21, 30]);
+  assert.ok(metrics.process.rss > 0 && metrics.uptime >= 0);
+});

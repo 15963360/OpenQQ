@@ -65,8 +65,9 @@ async function start(qq, config, existingWebUI) {
   let webui;
   let network;
   const execute = async (request, source) => {
+    const started = performance.now();
     const response = await dispatchAction(channel, convert, request);
-    webui?.publish('action', { request, response });
+    webui?.publish('action', { request, response, source, elapsed: Math.round(performance.now() - started) });
     // Terminal actions are printed by the input loop; external actions are mirrored here.
     if (source !== 'terminal') out.action(request, response, source);
     return response;

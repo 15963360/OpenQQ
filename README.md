@@ -13,7 +13,7 @@
 - **OneBot v11 接入**：支持正向 WebSocket 服务端（Bearer Header 或 `access_token` 查询参数鉴权，带失败限流）和反向 WebSocket 客户端（断线指数退避重连，支持多目标与自定义心跳）。
 - **环境自动探测**：自动扫描 Windows 注册表与常见路径定位 QQ NT 客户端目录，并检查已编译的 C++ 原生引导器。
 - **PE64 原生兼容性检查**：启动前静态解析 `QQNT.dll` 与 `wrapper.node` 的 x64 PE 导出表与架构，验证所需 N-API 符号与 `qq_magic_napi_register` 存在。
-- **WebUI 配置向导与控制台**：本地回环 WebUI（仅监听 `127.0.0.1`，随机生成临时访问密钥）提供图形化配置向导（`/setup`）与实时事件 / 诊断 / 动作调试台（`/`）。
+- **WebUI 配置向导与控制台**：本地回环 WebUI（仅监听 `127.0.0.1`，随机生成临时访问密钥）提供图形化配置向导（`/setup`）与控制台：概览（会话、吞吐、连接健康）、按会话收发消息、事件流、OneBot 动作调试、运行日志，以及账号、连接和设置管理。
 - **终端交互与 JSONL 输出**：交互式终端支持命令补全、历史记录与 `/verbose`、`/clear`、`/quit`；在管道或 `--json` 模式下输出标准 OneBot JSON Lines。
 
 ## 环境要求
@@ -96,7 +96,7 @@ npm start -- --qq-root "C:\Program Files\Tencent\QQNT"
 | --- | --- |
 | `src/` | Node 主进程：配置、环境探测、OneBot 网络层、终端与 WebUI 服务 |
 | `native/` | C++ 启动器与自有 DLL，以及 QQ 内的 JavaScript 会话、事件与动作处理 |
-| `ui/` | WebUI 源码（React），构建产物输出到 `web/` |
+| `ui/` | WebUI 源码（React + TypeScript、Tailwind CSS、Radix UI），构建产物输出到 `web/` |
 | `web/` | WebUI 静态入口页面与构建产物 |
 | `config/` | 配置示例；本地 `openqq.json` 不纳入版本控制 |
 | `docs/` | 接入、动作、事件与原生挂接文档 |

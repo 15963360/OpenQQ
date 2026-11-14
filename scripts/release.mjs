@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildUI } from '../ui/build.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -181,29 +182,7 @@ async function main() {
   writeOut('native/session.cjs', sessionObf);
 
   // 3. WebUI assets.
-  const uiBuild = await build({
-    absWorkingDir: root,
-    entryPoints: ['ui/main.jsx'],
-    outfile: join(releaseDir, 'web/app.js'),
-    bundle: true,
-    minify: true,
-    write: false,
-    format: 'esm',
-    platform: 'browser',
-    target: ['es2022'],
-    jsx: 'automatic',
-    define: { 'process.env.NODE_ENV': '"production"' },
-    legalComments: 'eof',
-  });
-  for (const file of uiBuild.outputFiles) {
-    mkdirSync(dirname(file.path), { recursive: true });
-    if (file.path.endsWith('.js')) {
-      writeFileSync(file.path, obfuscateJS(file.text, uiObfuscationOptions));
-    } else {
-      writeFileSync(file.path, file.contents);
-    }
-  }
-  copyOut('ui/theme.css', 'web/theme.css');
+  await buildUI({ outdir: join(releaseDir, 'web'), transform: code => obfuscateJS(code, uiObfuscationOptions), logLevel: 'warning' });
   copyOut('web/index.html', 'web/index.html');
   copyOut('web/setup.html', 'web/setup.html');
 

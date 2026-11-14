@@ -23,6 +23,23 @@ export function describeEntry(entry) {
     text: value.sub_type === 'poke' ? value.user_id + ' 戳了戳 ' + value.target_id : String(value.file?.name || value.status_text || value.reason || value.group_name || '查看事件详情'), source };
 }
 
+// Severity and readable text for a diagnostic entry; mirrors the terminal wording in src/console.mjs.
+export function describeLog(entry) {
+  const value = entry.data || {};
+  const stage = value.stage ? `[${value.stage}] ` : '';
+  switch (value.type) {
+    case 'wrapper_loaded': return { level: 'success', message: `已包装会话工厂（${value.factories} 个入口）` };
+    case 'session_captured': return { level: 'success', message: '已捕获 QQ 会话，等待登录完成' };
+    case 'session_ready': return { level: 'success', message: `QQ 会话就绪 · ${value.self_id ?? ''}`.trim() };
+    case 'sync_state': return value.syncing ? { level: 'info', message: 'QQ 正在同步消息与好友列表' } : { level: 'success', message: '同步完成，开始报告好友变化' };
+    case 'offline': return { level: 'error', message: '账号已掉线' };
+    case 'hook_error': return { level: 'error', message: `挂接失败 ${stage}${value.error ?? ''}`.trim() };
+    case 'event_error': return { level: 'warn', message: `事件处理失败 ${stage}${value.error ?? ''}`.trim() };
+    case 'native_callback': return { level: 'debug', message: `未适配回调 ${value.source ?? ''}/${value.event ?? ''}` };
+    default: return { level: 'debug', message: String(value.error || value.event || value.stage || value.type || '运行状态更新') };
+  }
+}
+
 export function identifier(value) {
   const text = String(value ?? '').trim();
   if (!/^[1-9]\d*$/.test(text) || !Number.isSafeInteger(Number(text))) throw new Error('请输入有效的 QQ 号或群号');

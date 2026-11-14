@@ -1,15 +1,66 @@
 import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { availableParallelism } from 'node:os';
 
+// Client-side routes of the single-page console; each one serves index.html.
+const pages = ['/', '/messages', '/events', '/actions', '/logs', '/account', '/connections', '/settings'];
 const files = new Map([
-  ['/', ['index.html', 'text/html; charset=utf-8']],
+  ...pages.map(path => [path, ['index.html', 'text/html; charset=utf-8']]),
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/styles.css', ['app.css', 'text/css; charset=utf-8']],
   ['/theme.css', ['theme.css', 'text/css; charset=utf-8']],
+  ['/fonts/inter.woff2', ['fonts/inter.woff2', 'font/woff2']],
+  ['/fonts/mono.woff2', ['fonts/mono.woff2', 'font/woff2']],
   ['/setup', ['setup.html', 'text/html; charset=utf-8']],
 ]);
 const limit = 2 * 1024 * 1024;
+const minute = 60000;
+
+// Per-minute throughput, action latency and bridge-process usage for /api/metrics. Everything is in memory.
+function createMetrics() {
+  const startedAt = Date.now();
+  const buckets = new Map();
+  const latencies = [];
+  let cpu = process.cpuUsage(), sampled = performance.now();
+  function bucket(time = Date.now()) {
+    const key = Math.floor(time / minute) * minute;
+    let value = buckets.get(key);
+    if (!value) {
+      value = { minute: key, events: 0, actions: 0, errors: 0 }; buckets.set(key, value);
+      for (const old of buckets.keys()) if (old <= key - 60 * minute) buckets.delete(old);
+    }
+    return value;
+  }
+  return {
+    record(kind, failed, elapsed) {
+      const value = bucket();
+      if (kind === 'event') value.events++;
+      if (kind === 'action') value.actions++;
+      if (failed) value.errors++;
+      if (kind === 'action' && Number.isFinite(elapsed) && elapsed >= 0) { latencies.push(elapsed); if (latencies.length > 200) latencies.shift(); }
+    },
+    snapshot() {
+      const now = Date.now(), current = Math.floor(now / minute) * minute;
+      const timeline = Array.from({ length: 60 }, (_, index) => {
+        const key = current - (59 - index) * minute;
+        return buckets.get(key) ?? { minute: key, events: 0, actions: 0, errors: 0 };
+      });
+      const usage = process.cpuUsage(cpu), wall = performance.now() - sampled;
+      cpu = process.cpuUsage(); sampled = performance.now();
+      const memory = process.memoryUsage();
+      const sorted = [...latencies].sort((a, b) => a - b);
+      return {
+        startedAt: new Date(startedAt).toISOString(), uptime: Math.floor((now - startedAt) / 1000),
+        process: { pid: process.pid, node: process.version, platform: process.platform, rss: memory.rss, heapUsed: memory.heapUsed, heapTotal: memory.heapTotal,
+          cpu: wall > 0 ? Math.min(100, (usage.user + usage.system) / 1000 / wall / availableParallelism() * 100) : 0 },
+        latency: { samples: sorted.length, average: sorted.length ? sorted.reduce((sum, value) => sum + value, 0) / sorted.length : null,
+          p95: sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] : null, last: latencies.at(-1) ?? null },
+        timeline,
+      };
+    },
+  };
+}
 
 export async function startWebUI({ port = 17860, status = { phase: 'detached' }, dispatch, configuration } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('WebUI 端口必须为 0..65535 的整数');
@@ -24,6 +75,7 @@ export async function startWebUI({ port = 17860, status = { phase: 'detached' },
   let closing = false;
   let activeBodies = 0;
   let activeActions = 0;
+  const metrics = createMetrics();
   const assets = new Map(await Promise.all([...files].map(async ([path, [name, type]]) => [path, { type,
     body: await readFile(new URL('../web/' + name, import.meta.url)),
   }])));
@@ -84,6 +136,9 @@ export async function startWebUI({ port = 17860, status = { phase: 'detached' },
       clients.add(response);
       response.on('close', () => clients.delete(response));
       return;
+    }
+    if (request.method === 'GET' && path === '/api/metrics') {
+      json(response, 200, metrics.snapshot()); return;
     }
     if (request.method === 'GET' && path === '/api/config' && configuration) {
       json(response, 200, configuration.get()); return;
@@ -155,9 +210,11 @@ export async function startWebUI({ port = 17860, status = { phase: 'detached' },
       const entry = { id: ++sequence, kind, time: new Date().toISOString(), data };
       const size = Buffer.byteLength(JSON.stringify(entry));
       if (size > limit) return;
+      const failed = (kind === 'action' && data.response?.status === 'failed') || (kind === 'diagnostic' && ['event_error', 'hook_error'].includes(data.type));
       if (kind === 'event') counts.events++;
       if (kind === 'action') counts.actions++;
-      if ((kind === 'action' && data.response?.status === 'failed') || (kind === 'diagnostic' && ['event_error', 'hook_error'].includes(data.type))) counts.errors++;
+      if (failed) counts.errors++;
+      metrics.record(kind, failed, data?.elapsed);
       history.push({ entry, size }); bytes += size;
       while (history.length > 200 || bytes > limit) bytes -= history.shift().size;
       for (const client of clients) frame(client, 'entry', { entry, counts });

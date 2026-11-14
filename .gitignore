@@ -5,6 +5,7 @@ node_modules/
 web/app.js
 web/app.css
 web/theme.css
+web/fonts/
 *.map
 dist/
 
