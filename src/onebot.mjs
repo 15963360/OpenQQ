@@ -10,6 +10,7 @@ const id = (value, field) => integer(value, field, 1);
 
 export function createEventConverter() {
   const ids = new Map();
+  const refs = new Map();
   const seen = new Map();
   let nextId = 1;
   const keyOf = (selfId, message, nativeId = message.msgId) => {
@@ -18,11 +19,44 @@ export function createEventConverter() {
     }
     return [selfId, message.chatType, message.peerUid, nativeId].join(':');
   };
-  function messageId(key) {
-    if (!ids.has(key)) ids.set(key, nextId++);
+  // Every OneBot id maps back to the native reference actions need (reply quotes, get_forward_msg).
+  function messageId(key, ref) {
+    if (!ids.has(key)) {
+      ids.set(key, nextId);
+      if (ref) refs.set(nextId, ref);
+      nextId++;
+    }
     // shortcut: correlation and deduplication retain 10000 entries in memory, persist before adding history APIs.
-    if (ids.size > 10000) ids.delete(ids.keys().next().value);
+    if (ids.size > 10000) {
+      const [, oldest] = ids.entries().next().value;
+      ids.delete(ids.keys().next().value);
+      refs.delete(oldest);
+    }
     return ids.get(key);
+  }
+  const messageRef = (selfId, message, nativeId = message.msgId) => messageId(keyOf(selfId, message, nativeId),
+    { kind: 'message', selfId, chatType: message.chatType, peerUid: String(message.peerUid), msgId: String(nativeId) });
+  function forwardId(selfId, ref) {
+    if (![ref?.root, ref?.parent].every(value => /^\d+$/.test(String(value)))) throw new Error('合并转发标识无效');
+    return messageId(['forward', selfId, ref.chatType, ref.peerUid, ref.root, ref.parent].join(':'),
+      { kind: 'forward', selfId, chatType: ref.chatType, peerUid: String(ref.peerUid), root: String(ref.root), parent: String(ref.parent) });
+  }
+  // Forwarded messages become go-cqhttp/NapCat compatible nodes: sender, time and the segments as message/content.
+  function forwardNodes(selfId, ref, messages) {
+    return messages.map(item => {
+      const segments = (item.elements ?? []).map(element => convertSegment(element,
+        original => messageRef(selfId, ref, original), inner => forwardSegment(selfId, inner)));
+      const userId = /^[1-9]\d*$/.test(String(item.senderUin)) && Number.isSafeInteger(Number(item.senderUin)) ? Number(item.senderUin) : 0;
+      const nickname = String(item.sendMemberName || item.sendNickName || '');
+      const time = /^\d+$/.test(String(item.msgTime)) ? Number(item.msgTime) : 0;
+      return { time, message_type: ref.chatType === 2 ? 'group' : 'private', user_id: userId,
+        sender: { user_id: userId, nickname }, message: segments, content: segments, raw_message: cqString(segments), message_format: 'array' };
+    });
+  }
+  function forwardSegment(selfId, ref) {
+    const data = { id: String(forwardId(selfId, ref)) };
+    if (Array.isArray(ref.messages)) data.content = forwardNodes(selfId, ref, ref.messages);
+    return { type: 'forward', data };
   }
   function messageEvent(self, message) {
     if (![1, 2, 100].includes(message.chatType)) return null;
@@ -41,10 +75,11 @@ export function createEventConverter() {
     } else {
       const senderId = id(message.senderUin, 'user_id');
       if (senderId === selfId) return null;
-      const segments = message.elements.map(element => convertSegment(element, original => messageId(keyOf(selfId, message, original))));
+      const segments = message.elements.map(element => convertSegment(element, original => messageRef(selfId, message, original),
+        ref => forwardSegment(selfId, ref)));
       event = { post_type: 'message', message_type: message.chatType === 2 ? 'group' : 'private',
         sub_type: message.chatType === 2 ? 'normal' : message.chatType === 100 ? 'group' : 'other',
-        message_id: messageId(key), user_id: senderId, message: segments, raw_message: cqString(segments),
+        message_id: messageRef(selfId, message), user_id: senderId, message: segments, raw_message: cqString(segments),
         font: 0, sender: { user_id: senderId, nickname: String(message.sendNickName ?? '') },
       };
       if (message.chatType === 2) {
@@ -71,7 +106,7 @@ export function createEventConverter() {
       const subtypes = { group_admin: ['set', 'unset'], group_increase: ['approve', 'invite'], group_decrease: ['leave', 'kick', 'kick_me'], group_ban: ['ban', 'lift_ban'], group: ['add', 'invite'] };
       if (Object.hasOwn(subtypes, type) && !subtypes[type].includes(event.sub_type)) throw new Error('事件 sub_type 无效');
       if (type === 'group_ban') event.duration = integer(event.duration, 'duration', -1);
-      if (type === 'group_recall' || type === 'friend_recall') event.message_id = messageId(keyOf(selfId, raw.message));
+      if (type === 'group_recall' || type === 'friend_recall') event.message_id = messageRef(selfId, raw.message);
       if (type === 'group_upload') {
         if (typeof event.file?.id !== 'string' || !event.file.id || typeof event.file.name !== 'string') throw new Error('群文件标识无效');
         event.file = { ...event.file, size: integer(event.file.size, 'file.size'), busid: integer(event.file.busid, 'file.busid') };
@@ -88,7 +123,16 @@ export function createEventConverter() {
     }
     return result.event;
   };
-  convert.messageId = (self, message) => messageId(keyOf(id(self.uin, 'self_id'), message));
+  convert.messageId = (self, message) => messageRef(id(self.uin, 'self_id'), message);
+  // OneBot id → native reference (message or forward) seen in this run, or undefined.
+  convert.resolve = value => {
+    if ((typeof value !== 'string' && typeof value !== 'number') || !/^[1-9]\d*$/.test(String(value))) return undefined;
+    return refs.get(Number(value));
+  };
+  convert.forwardResult = (self, forward) => {
+    if (!forward?.ref || !Array.isArray(forward.messages)) throw new Error('合并转发回执无效');
+    return { messages: forwardNodes(id(self.uin, 'self_id'), forward.ref, forward.messages) };
+  };
   return convert;
 }
 

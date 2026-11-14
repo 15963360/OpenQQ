@@ -9,7 +9,7 @@ npm install
 npm test
 ```
 
-- Node.js `>= 22`；原生挂接相关改动还需要 64 位 Python 与 `frida >= 17.8`（见 [README](README.md)）。
+- Node.js `>= 22`；原生挂接相关改动还需要本机 CMake、C++17 x64 编译器（MinGW 还需 Ninja）（见 [README](README.md)）。
 - WebUI 源码在 `ui/`，`npm run build` 会打包到 `web/`；构建产物不纳入版本控制。
 
 ## 提交 Pull Request

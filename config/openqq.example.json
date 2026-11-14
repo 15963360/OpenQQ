@@ -1,7 +1,6 @@
 {
   "version": 1,
   "qqRoot": "C:\\Program Files\\Tencent\\QQNT",
-  "python": "python",
   "webPort": 17860,
   "accessToken": "replace-with-at-least-16-random-ascii-chars",
   "ws": {

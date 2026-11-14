@@ -34,6 +34,15 @@ const pad = (text, size) => text + ' '.repeat(Math.max(1, size - width(text)));
 const clock = (seconds, zone) => new Date(seconds ? seconds * 1000 : Date.now())
   .toLocaleTimeString('zh-CN', { hour12: false, timeZone: zone });
 
+// Ark cards carry their own one-line summary ("prompt"); fall back to the app name.
+function appTitle(raw) {
+  try {
+    const card = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const title = String(card?.prompt || card?.meta?.detail_1?.title || card?.meta?.news?.title || card?.app || '').trim();
+    return title ? ' ' + sanitizeTerminal(title.slice(0, 60), false) : '';
+  } catch { return ''; }
+}
+
 export function segmentPreview(segment) {
   const data = segment?.data ?? {};
   switch (segment?.type) {
@@ -45,7 +54,8 @@ export function segmentPreview(segment) {
     case 'video': return '[视频]';
     case 'file': return `[文件 ${data.file ?? ''}]`;
     case 'reply': return `[回复 #${data.id}]`;
-    case 'json': return '[卡片]';
+    case 'json': return `[应用${appTitle(data.data)}]`;
+    case 'forward': return `[合并转发 #${data.id}${Array.isArray(data.content) ? ` · ${data.content.length} 条` : ''}]`;
     case 'xml': return '[XML 卡片]';
     case 'mface': return `[${data.summary || '商城表情'}]`;
     case 'markdown': return '[Markdown]';
@@ -101,7 +111,7 @@ export function describeEvent(event) {
   return notice(`${e.notice_type}${e.sub_type ? '/' + e.sub_type : ''} ${group}${e.user_id ?? ''}`);
 }
 
-const actionNames = { send_private_msg: '发送私聊', send_group_msg: '发送群聊', send_msg: '发送消息', set_input_status: '输入状态',
+const actionNames = { send_private_msg: '发送私聊', send_group_msg: '发送群聊', send_msg: '发送消息', set_input_status: '输入状态', get_forward_msg: '合并转发',
   get_login_info: '登录信息', get_status: '运行状态' };
 
 function actionTarget(request) {
@@ -212,7 +222,7 @@ export function createConsole({ stdout = process.stdout, stderr = process.stderr
   return api;
 }
 
-// Maps one line from the Frida bootstrap process. Returns null for QQ's own console output.
+// Maps one line from the C++ bootstrap process. Returns null for QQ's own console output.
 export function describeNativeLine(text) {
   const match = text.match(/^\[OpenQQ\/native\] (.*)$/);
   if (!match) return null;
@@ -221,7 +231,7 @@ export function describeNativeLine(text) {
   switch (payload.stage) {
     case 'runtime_found': return ['info', `找到 QQ 运行时 ${payload.name}（PID ${payload.pid}）`];
     case 'addon_register': return payload.target ? ['ok', `目标 wrapper.node 已注册（${payload.name}）`] : ['debug', `跳过原生模块 ${payload.name || '(无名)'} · ${payload.owner ?? '未知 DLL'}`];
-    case 'bootstrapped': return ['ok', '脚本已注入 QQ，Frida 即将脱离'];
+    case 'bootstrapped': return ['ok', '脚本已载入 QQ，原生引导器已脱离'];
     case 'error': return ['error', '原生引导失败：' + payload.error];
     default: return ['debug', '原生引导 ' + match[1]];
   }

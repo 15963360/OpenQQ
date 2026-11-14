@@ -8,7 +8,7 @@ import { request as httpRequest } from 'node:http';
 import { PassThrough } from 'node:stream';
 import WebSocket from 'ws';
 
-import { isUncPath, validateExecutablePath } from '../src/env.mjs';
+import { isUncPath, probeNative } from '../src/env.mjs';
 import { readPE64Info, inspectQQ } from '../src/qq.mjs';
 import { defaultConfig, validateConfig } from '../src/config.mjs';
 import { sanitizeTerminal, createConsole } from '../src/console.mjs';
@@ -72,26 +72,15 @@ function makeSyntheticPE64(exportNames = [], machine = 0x8664) {
   return buf;
 }
 
-test('env & config reject UNC paths, batch scripts and hardcoded personal defaults', () => {
-  assert.equal(isUncPath('\\\\server\\share\\python.exe'), true);
+test('env & config reject UNC paths and do not require an interpreter', () => {
+  assert.equal(isUncPath('\\\\server\\share'), true);
   assert.equal(isUncPath('//evil/share'), true);
-  assert.equal(isUncPath('C:\\Python313\\python.exe'), false);
-
-  assert.throws(() => validateExecutablePath('\\\\evil\\share\\python.exe', 'python'), /UNC/);
-  assert.throws(() => validateExecutablePath('C:\\temp\\run.bat', 'python'), /脚本文件/);
-  assert.throws(() => validateExecutablePath('C:\\temp\\python.ps1', 'python'), /脚本文件/);
-  if (process.platform === 'win32') {
-    assert.throws(() => validateExecutablePath('C:\\Windows\\notepad.exe', 'python'), /python\.exe/);
-    assert.equal(validateExecutablePath('C:\\Python313\\python.exe', 'python'), 'C:\\Python313\\python.exe');
-  }
-  assert.equal(validateExecutablePath('python', 'python'), 'python');
-
+  assert.equal(isUncPath('C:\\QQ'), false);
   const def = defaultConfig();
   assert.equal(/DeobfTools|D:\\qq/i.test(JSON.stringify(def)), false);
-  assert.deepEqual(validateConfig(def).version, 1);
-
+  assert.equal(validateConfig(def).version, 1);
   assert.throws(() => validateConfig({ ...def, qqRoot: '\\\\fileserver\\qq' }), /qqRoot/);
-  assert.throws(() => validateConfig({ ...def, python: 'C:\\evil\\wrap.cmd' }), /脚本/);
+  assert.equal(probeNative(join(tmpdir(), 'openqq-missing-native')).ready, false);
 });
 
 test('readPE64Info and inspectQQ verify x64 exports without hard-locking a single QQ version', () => {
@@ -179,7 +168,7 @@ test('forward WS rejects // URLs, requires strict Bearer header and rate limits 
   const accessToken = 'secret-token-0123456789';
   let address = '';
   const net = await startOneBot({
-    config: { version: 1, qqRoot: 'C:\\QQ', python: 'python', webPort: 17860, accessToken, ws: { enabled: true, host: '127.0.0.1', port: 0 }, reverseWs: [] },
+    config: { version: 1, qqRoot: 'C:\\QQ', webPort: 17860, accessToken, ws: { enabled: true, host: '127.0.0.1', port: 0 }, reverseWs: [] },
     dispatch: async () => ({ status: 'ok', retcode: 0, data: null }),
     onStatus: status => { if (status.ws?.address) address = status.ws.address; },
   });
@@ -236,7 +225,7 @@ test('WebUI serves theme.css, POST /api/check and updated custom SVG UI without 
   const ui = await startWebUI({
     port: 0,
     configuration: {
-      get: () => ({ config: defaultConfig(), initialized: false, running: false, configPath: 'config/openqq.json', detected: { qq: { valid: false }, python: { exists: false } } }),
+      get: () => ({ config: defaultConfig(), initialized: false, running: false, configPath: 'config/openqq.json', detected: { qq: { valid: false }, native: { ready: false } } }),
       check: body => { checkedBody = body; return { ok: true, received: body }; },
       save: value => ({ config: value, restartRequired: false, message: 'ok' }),
       start: () => ({ message: 'starting' }),
@@ -254,10 +243,10 @@ test('WebUI serves theme.css, POST /api/check and updated custom SVG UI without 
     const checkOk = await fetch(ui.origin + '/api/check', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'bearer ' + token },
-      body: JSON.stringify({ qqRoot: 'C:\\QQNT', python: 'python' }),
+      body: JSON.stringify({ qqRoot: 'C:\\QQNT' }),
     });
     assert.equal(checkOk.status, 200);
-    assert.deepEqual(checkedBody, { qqRoot: 'C:\\QQNT', python: 'python' });
+    assert.deepEqual(checkedBody, { qqRoot: 'C:\\QQNT' });
 
     const forbidden = /DeobfTools|Asia\/Singapore|连接，从这里开始|你的 OpenQQ，准备好了|设置助理|D:\\\\qq/;
     // web/ is built from ui/ (npm run build); scan both the shipped files and their sources.

@@ -27,17 +27,37 @@
 
 ## OneBot 动作
 
-支持 `send_private_msg`、`send_group_msg`、`send_msg`、`get_login_info`、`get_status`，以及扩展动作 `set_input_status`。
+支持 `send_private_msg`、`send_group_msg`、`send_msg`、`get_forward_msg`、`get_login_info`、`get_status`，以及扩展动作 `set_input_status`。
 
 ```json
 {"action":"send_private_msg","params":{"user_id":123456789,"message":"你好","auto_escape":true},"echo":"send-1"}
 {"action":"send_group_msg","params":{"group_id":987654321,"message":[{"type":"text","data":{"text":"群消息测试"}}]},"echo":"send-2"}
+{"action":"send_group_msg","params":{"group_id":987654321,"message":[{"type":"reply","data":{"id":"12"}},{"type":"text","data":{"text":"收到"}}]},"echo":"reply-1"}
+{"action":"get_forward_msg","params":{"id":"15"},"echo":"forward-1"}
 {"action":"set_input_status","params":{"user_id":123456789,"event_type":1},"echo":"typing-1"}
 {"action":"get_login_info","echo":"login-1"}
 ```
 
 每个 JSON 对象占一行；文本换行可写为 JSON 的 `\n`。`send_msg` 可指定 `message_type`，或只提供 `user_id`、`group_id` 中的一种来确定目标。
-目前发送只接受纯文本或最多 100 个 `text` 段，总内容不超过 64 KiB。字符串包含 `[CQ:` 且未指定 `auto_escape:true` 时会拒绝；图片、语音、@、回复等发送段尚未接入。
+发送接受纯文本，或最多 100 个消息段，总内容不超过 64 KiB：
+
+| 消息段 | 说明 |
+| --- | --- |
+| `text` | 纯文本 |
+| `reply` | 引用一条消息，`data.id` 为本次运行期间收到或发出的 `message_id`；只能引用同一会话的消息，每条最多一个，发送时自动放在最前面 |
+| `json` | 应用（Ark）卡片，`data.data` 为 JSON 对象或其字符串；必须单独发送。QQ 会校验卡片签名，未签名或签名过期的卡片可能被拒绝 |
+
+字符串包含 `[CQ:` 且未指定 `auto_escape:true` 时会拒绝（字符串消息暂不解析 CQ 码，请改用消息段数组）；图片、语音、@ 等发送段尚未接入。
+
+## 合并转发
+
+收到的合并转发会转换为 `forward` 段，`data.id` 可用于 `get_forward_msg`；如果内容拉取成功，`data.content` 还会直接携带转发内容（最多嵌套 3 层、200 条、512 KiB）。`get_forward_msg` 也接受携带转发的那条消息的 `message_id`，返回：
+
+```json
+{"status":"ok","retcode":0,"data":{"messages":[{"time":1794470300,"message_type":"group","user_id":123456789,"sender":{"user_id":123456789,"nickname":"昵称"},"message":[{"type":"text","data":{"text":"内容"}}],"content":[{"type":"text","data":{"text":"内容"}}],"raw_message":"内容","message_format":"array"}]}}
+```
+
+每个节点同时提供 `message`（NapCat 格式）和 `content`（go-cqhttp 格式）。转发里查不到 QQ 号的作者 `user_id` 为 `0`，昵称保留。`raw_message` 中的转发只写 `[CQ:forward,id=…]`。
 
 发送成功回执示例：
 
@@ -54,7 +74,7 @@
 | retcode | 含义 |
 | --- | --- |
 | `1400` | 参数或输入格式无效，未提交发送 |
-| `1404` | 动作尚未支持 |
+| `1404` | 动作尚未支持，或引用/转发的 id 不存在、已过期 |
 | `1500` | 原生调用失败或回执无效 |
 | `1501` | 超时，已提交的发送结果可能未确认 |
 | `1502` | 会话未就绪、重新初始化或 IPC 断开 |
@@ -66,6 +86,6 @@
 
 支持的参数校验规则、UID 转换、并发回执匹配、超时与断线保护均有对应测试覆盖。若在未经过完整基准验证的新版本 QQ NT 上运行，请结合终端 `/verbose` 日志或 WebUI 运行诊断核对发送回调字段。
 
-后续再接媒体/回复发送、主动撤回、戳一戳、申请处理及群管理。
+后续再接图片/语音/@ 发送、主动撤回、戳一戳、申请处理及群管理。
 
 协议字段参考 [OneBot v11 公开 API](https://github.com/botuniverse/onebot-11/blob/master/api/public.md)。输入状态是扩展能力。

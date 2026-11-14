@@ -1,14 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import { readFileSync, mkdirSync, writeFileSync, renameSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { isUncPath, validateExecutablePath } from './env.mjs';
+import { isUncPath } from './env.mjs';
 
 export function defaultConfig(detected = {}) {
   const defaultRoot = process.platform === 'win32' ? 'C:\\Program Files\\Tencent\\QQNT' : '/opt/QQ';
   return {
     version: 1,
     qqRoot: detected.qqRoot || process.env.OPENQQ_QQ_ROOT || defaultRoot,
-    python: detected.python || process.env.OPENQQ_PYTHON || 'python',
     webPort: 17860,
     accessToken: randomBytes(32).toString('hex'),
     ws: { enabled: true, host: '127.0.0.1', port: 3001 },
@@ -22,7 +21,6 @@ export function validateConfig(value) {
   if (typeof value.qqRoot !== 'string' || !value.qqRoot.trim() || value.qqRoot.length > 4096 || /[\0\r\n]/.test(value.qqRoot) || isUncPath(value.qqRoot)) {
     fail('qqRoot 路径无效');
   }
-  const pythonPath = validateExecutablePath(value.python, 'python');
   const port = n => Number.isInteger(n) && n >= 1 && n <= 65535;
   if (!port(value.webPort)) fail('WebUI 端口必须为 1..65535');
   if (typeof value.accessToken !== 'string' || !/^[\x21-\x7e]{16,256}$/.test(value.accessToken)) fail('OneBot 令牌需要 16..256 位非空格 ASCII 字符');
@@ -40,7 +38,6 @@ export function validateConfig(value) {
   return {
     version: 1,
     qqRoot: value.qqRoot.trim(),
-    python: pythonPath,
     webPort: value.webPort,
     accessToken: value.accessToken,
     ws: { enabled: value.ws.enabled, host: value.ws.host, port: value.ws.port },

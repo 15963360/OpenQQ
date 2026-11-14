@@ -1,6 +1,6 @@
 # 原生挂接原理与客户端兼容性
 
-本文档说明 OpenQQ 如何在不依赖 Electron `--inspect` 端口、不加载第三方注入模块的前提下，对 Windows x64 QQ NT 客户端进行环境校验与原生会话接入。
+本文档说明 OpenQQ 如何在不依赖 Electron `--inspect` 端口、使用自有 C++ DLL 与 Windows 系统运行库的前提下，对 Windows x64 QQ NT 客户端进行环境校验与原生会话接入。
 
 ## 安装目录与 PE64 兼容性检查
 
@@ -28,14 +28,15 @@ Windows QQ NT 启用 Electron Fuses 禁用调试参数后，仍通过 `QQNT.dll`
 
 OpenQQ 启动链路如下：
 
-1. **标准输入传参**：Node 主进程创建命名管道（`src/ipc.mjs`）及一次性随机会话令牌，通过标准输入（`--config-stdin`）将 `{ pipe, token, wrapper, payload }` 传给 `native/launch.py`，不把凭据写入进程命令行参数。
-2. **加载前拦截**：`native/launch.py` 使用 Frida 以挂起或子进程附加方式拉起 `QQ.exe`，在目标加载 `QQNT.dll` 与 `wrapper.node` 时注入 `native/agent.js`（并在捕获目标模块后立即移除模块加载监听器）。
-3. **无调试端口会话接入**：`native/agent.js` 在 `qq_magic_napi_register` 与核心 N-API 函数处接入模块导出对象创建流程，将 `native/session.cjs`、`native/events.cjs` 和 `native/actions.cjs` 绑定到 QQ 原生服务对象（`msg`、`buddy`、`group`、`getUixConvertService` 等）的调用与事件回调中。
-4. **结构化事件桥接**：原生侧将回调事件序列化为内部消息后通过命名管道发送给 Node 主进程，再由 `src/onebot.mjs` 统一校验、映射消息 ID 并按 OneBot v11 协议格式分发至终端、WebUI 和 WebSocket 连接。
+1. **标准输入传参**：Node 主进程创建命名管道（`src/ipc.mjs`）及一次性随机会话令牌，将 QQ、wrapper、自有 DLL 路径和脚本作为四行 UTF-8 数据传给 `native/bin/openqq-launch.exe`。脚本中的路径与令牌经过 JSON 转义，凭据不进入命令行或临时文件。
+2. **加载前拦截**：`native/launch.cpp` 使用 `CreateProcessW(DEBUG_ONLY_THIS_PROCESS)` 拉起 QQ，在 DLL 加载事件中解析 `QQNT.dll` 的导出，并为各线程设置一次性的硬件执行断点。根据初始化回调所属模块的规范化文件路径，只选择配置指定的 wrapper。
+3. **无调试端口会话接入**：在 wrapper 初始化回调入口，启动器暂挂该线程，通过系统 `LoadLibraryW` 加载 `openqq-bootstrap.dll`，随后将回调入口转交 DLL。DLL 先调用原始初始化函数，再使用 QQ 自身的 N-API 执行 `native/session.cjs`；脚本绑定原生服务的调用与事件回调，导出对象通过 escapable handle scope 安全返回。原始初始化异常保留，桥接脚本新增的异常会清理并上报。
+4. **脱离与清理**：启动器清除硬件断点并脱离调试。超时、取消和初始化失败也执行清理并恢复暂挂线程。自有 DLL 与少量配置内存保留到 QQ 退出；无需持续运行调试器。
+5. **结构化事件桥接**：原生侧将回调事件序列化为内部消息后通过命名管道发送给 Node 主进程，再由 `src/onebot.mjs` 统一校验、映射消息 ID 并按 OneBot v11 协议格式分发至终端、WebUI 和 WebSocket 连接。
 
 ## 环境自动探测逻辑
 
 `src/env.mjs` 提供跨环境自动查找能力：
 
 - **QQ NT 查找**：依次检查环境变量 `OPENQQ_QQ_ROOT`、Windows 注册表卸载与安装键（`HKLM/HKCU` 下的 Tencent QQNT / `Uninstall\QQ`）及常见安装盘符目录，筛选存在有效可执行文件且通过结构检查的安装位置。
-- **Python 与 Frida 查找**：依次检查指定路径、`OPENQQ_PYTHON`、项目本地 `.venv`/`venv`、`py -0p`、`where python` 及系统常规安装目录，跳过 Microsoft Store 应用别名占位符并执行导入探测，优先选择已安装 `frida >= 17.8` 的 64 位解释器，同时拒绝 UNC 路径与批处理/脚本外壳。
+- **原生组件检查**：检查项目内的 `native/bin/openqq-launch.exe` 与 `openqq-bootstrap.dll`。源码构建使用本机已有的 CMake 和 C++17 x64 编译器；MinGW 静态链接编译器运行库，仅动态使用 Windows 系统库。未找到组件时提示运行 `npm run build:native`。

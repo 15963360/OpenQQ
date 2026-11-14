@@ -1,7 +1,7 @@
 function numeric(value) { return /^\d+$/.test(String(value)) && Number.isSafeInteger(Number(value)); }
 const text = value => typeof value === 'string' && value.length > 0;
 
-export function convertSegment(element, replyId) {
+export function convertSegment(element, replyId, forward) {
   const fallback = () => ({ type: 'openqq_element', data: { element_type: element.elementType, element } });
   if (element.elementType === 1) {
     const value = element.textElement;
@@ -35,6 +35,7 @@ export function convertSegment(element, replyId) {
     }
     return fallback();
   }
+  if (element.elementType === 16 && element.multiForwardMsgElement?.openqq && forward) return forward(element.multiForwardMsgElement.openqq);
   if (element.elementType === 10 && text(element.arkElement?.bytesData)) return { type: 'json', data: { data: element.arkElement.bytesData } };
   if (element.elementType === 13 && text(element.structLongMsgElement?.xmlContent)) return { type: 'xml', data: { data: element.structLongMsgElement.xmlContent } };
   if (element.elementType === 11 && element.marketFaceElement) {
@@ -47,6 +48,7 @@ export function convertSegment(element, replyId) {
 
 const escape = value => String(value).replaceAll('&', '&amp;').replaceAll('[', '&#91;').replaceAll(']', '&#93;');
 export function cqString(segments) {
+  // A forward's expanded content stays in the array form; its CQ code carries only the id, as in go-cqhttp.
   return segments.map(segment => segment.type === 'text' ? escape(segment.data.text)
-    : `[CQ:${segment.type}${Object.entries(segment.data).map(([key, value]) => `,${key}=${escape(typeof value === 'object' ? JSON.stringify(value) : value).replaceAll(',', '&#44;')}`).join('')}]`).join('');
+    : `[CQ:${segment.type}${Object.entries(segment.type === 'forward' ? { id: segment.data.id } : segment.data).map(([key, value]) => `,${key}=${escape(typeof value === 'object' ? JSON.stringify(value) : value).replaceAll(',', '&#44;')}`).join('')}]`).join('');
 }

@@ -9,11 +9,9 @@ export async function setupCLI(path, defaults, { input = process.stdin, output =
   output.write('\nOpenQQ 初始化 · 回车使用默认值 · Ctrl+C 取消\n');
   try {
     const config = structuredClone(defaults);
-    const detected = detect({ qqRoot: config.qqRoot, python: config.python });
+    const detected = detect({ qqRoot: config.qqRoot });
     if (detected.qq?.path && !defaults.qqRoot) config.qqRoot = detected.qq.path;
-    if (detected.python?.path && (!defaults.python || defaults.python === 'python')) config.python = detected.python.path;
     config.qqRoot = await ask('QQ 安装目录', config.qqRoot);
-    config.python = await ask('已安装 Frida 的 Python 路径', config.python);
     config.webPort = Number(await ask('WebUI 端口', config.webPort));
     const mode = await ask('接入方式：1 正向 WS（机器人连接 OpenQQ），2 反向 WS（OpenQQ 连接机器人）', config.ws.enabled ? '1' : '2');
     if (!['1', '2'].includes(mode)) throw new Error('接入方式需为 1 或 2');

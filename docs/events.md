@@ -10,6 +10,7 @@
 | 群临时会话 | `message/private/group` | 自动测试；待实机 |
 | 图片、表情、混合消息 | `image`、`face` 等消息段 | 用户日志确认图片、表情；图片下载尚未实现 |
 | @、语音、视频、回复、JSON/XML 卡片 | 标准消息段 | 自动测试；待实机；回复 ID 与消息/撤回共用映射 |
+| 合并转发 | `forward` 段，`data.content` 携带展开的节点 | 自动测试；待实机；拉取失败时只带 `id`，可用 `get_forward_msg` 重试 |
 | 文件、商城表情、Markdown | 扩展消息段 | 不自动下载；待实机 |
 | 群内戳一戳 | `notice/notify/poke` | 业务 `1061`；按 UID 解析操作者和目标；待实机 |
 | 私聊戳一戳 | `notice/notify/poke`，省略 `group_id` | OpenQQ 扩展；`user_id` 始终为操作者；待实机 |

@@ -3,6 +3,10 @@
 const { readSystemEvent } = require('./system.cjs');
 const validUin = value => /^[1-9]\d*$/.test(String(value)) && Number.isSafeInteger(Number(value));
 const now = () => Math.floor(Date.now() / 1000);
+// Merged-forward expansion limits: nesting depth, messages per root and serialized size (IPC frames cap at 1 MiB).
+const FORWARD_DEPTH = 3;
+const FORWARD_LIMIT = 200;
+const FORWARD_BYTES = 512 * 1024;
 
 function createEventReceiver(session, self, report, current) {
   const cache = new Map();
@@ -96,6 +100,81 @@ function createEventReceiver(session, self, report, current) {
     emit({ type: 'native_callback', source, event: name, argument_shapes: args.map(shape) });
   }
 
+  // Reply sends need msgSeq/clientSeq of the quoted message; keep them for recently seen messages.
+  const recent = new Map();
+  function record(input, senderUin = input.senderUin) {
+    if (!/^\d+$/.test(String(input?.msgId ?? ''))) return;
+    recent.set(`${input.chatType}:${input.peerUid}:${input.msgId}`, { msgId: String(input.msgId), msgSeq: String(input.msgSeq ?? ''),
+      clientSeq: String(input.clientSeq ?? ''), senderUin: String(senderUin ?? ''), senderUid: String(input.senderUid ?? '') });
+    if (recent.size > 5000) recent.delete(recent.keys().next().value);
+  }
+  const lookupRecent = ref => recent.get(`${ref.chatType}:${ref.peerUid}:${ref.msgId}`);
+
+  // Merged forwards: QQ fetches the content with getMultiMsg(peer, rootMsgId, parentMsgId), where root is the
+  // message in the chat and parent is the message that directly carries the (possibly nested) forward.
+  async function multiMsg(peer, root, parent) {
+    let timer;
+    try {
+      const result = await Promise.race([
+        session.getMsgService().getMultiMsg({ chatType: peer.chatType, peerUid: peer.peerUid, guildId: '' }, root, parent),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('合并转发内容获取超时（8 秒）')), 8000); }),
+      ]);
+      if (result?.result !== undefined && result.result !== 0) throw new Error(`QQ 拒绝获取合并转发：${result.errMsg || result.result}`);
+      if (!Array.isArray(result?.msgList)) throw new Error('合并转发内容结构未适配');
+      return result.msgList;
+    } finally { clearTimeout(timer); }
+  }
+  async function forwardMessages(ctx, parent) {
+    const list = await multiMsg(ctx.peer, ctx.root, parent);
+    const messages = [];
+    for (const item of list) {
+      if (!current()) throw new Error('会话已失效');
+      if (ctx.budget.left-- <= 0) break;
+      remember(item.senderUid, item.senderUin);
+      let senderUin = '0';
+      // Forwarded authors are often strangers; the nickname still identifies them, so a missing QQ number is not an error.
+      try { senderUin = await uin(item.senderUid, item.senderUin); } catch (error) { if (!current()) throw error; }
+      messages.push({ msgId: String(item.msgId ?? ''), msgTime: item.msgTime, senderUin, senderUid: item.senderUid,
+        sendNickName: item.sendNickName, sendMemberName: item.sendMemberName,
+        elements: await prepare(Array.isArray(item.elements) ? item.elements : [], { ...ctx, depth: ctx.depth + 1 }, String(item.msgId ?? '')) });
+    }
+    return messages;
+  }
+  async function expandForward(ref) {
+    return forwardMessages({ peer: { chatType: ref.chatType, peerUid: ref.peerUid }, root: ref.root, depth: 0, budget: { left: FORWARD_LIMIT } }, ref.parent);
+  }
+  const forwardSize = value => JSON.stringify(value, (_key, item) => typeof item === 'bigint' ? String(item) : item).length;
+
+  async function prepare(elements, ctx, msgId) {
+    return Promise.all(elements.map(async element => {
+      const text = element.textElement;
+      if (element.elementType === 1 && Number(text?.atType) === 2 && !validUin(text.atUid)) {
+        // An unresolvable @ target keeps the native element (delivered as openqq_element) rather than losing the message.
+        const target = await optionalUin(text.atNtUid, 'msg/at');
+        return target ? { ...element, textElement: { ...text, atUid: target } } : element;
+      }
+      const forward = element.multiForwardMsgElement;
+      if (element.elementType === 16 && forward && /^\d+$/.test(msgId)) {
+        const ref = { chatType: ctx.peer.chatType, peerUid: ctx.peer.peerUid, root: ctx.root, parent: msgId };
+        let messages;
+        if (ctx.depth < FORWARD_DEPTH) {
+          try {
+            messages = await forwardMessages(ctx, msgId);
+            if (forwardSize(messages) > FORWARD_BYTES) {
+              messages = undefined;
+              emit({ type: 'event_error', stage: 'msg/forward', error: '合并转发内容超过 512 KiB，事件只携带 id，请用 get_forward_msg 获取' });
+            }
+          } catch (error) {
+            if (!current()) throw error;
+            emit({ type: 'event_error', stage: 'msg/forward', error: error.message + '，事件只携带 id，可稍后用 get_forward_msg 重试' });
+          }
+        }
+        return { ...element, multiForwardMsgElement: { ...forward, openqq: { ...ref, ...(messages ? { messages } : {}) } } };
+      }
+      return element;
+    }));
+  }
+
   async function message(input, update = false) {
     if (![1, 2, 100].includes(input.chatType)) { native('msg', 'unsupported_chat', [input]); return; }
     remember(input.senderUid, input.senderUin);
@@ -167,15 +246,9 @@ function createEventReceiver(session, self, report, current) {
       return;
     }
     const senderUin = await uin(input.senderUid, input.senderUin);
-    const elements = await Promise.all((input.elements ?? []).map(async element => {
-      const text = element.textElement;
-      if (element.elementType === 1 && Number(text?.atType) === 2 && !validUin(text.atUid)) {
-        // An unresolvable @ target keeps the native element (delivered as openqq_element) rather than losing the message.
-        const target = await optionalUin(text.atNtUid, 'msg/at');
-        return target ? { ...element, textElement: { ...text, atUid: target } } : element;
-      }
-      return element;
-    }));
+    record(input, senderUin);
+    const elements = await prepare(input.elements ?? [], { peer: { chatType: input.chatType, peerUid: String(input.peerUid) },
+      root: String(input.msgId), depth: 0, budget: { left: FORWARD_LIMIT } }, String(input.msgId));
     emit({ type: 'message', self, message: { ...input, senderUin, elements } });
     if (input.chatType === 2) for (const element of elements) {
       const file = element.fileElement;
@@ -289,6 +362,10 @@ function createEventReceiver(session, self, report, current) {
     }
     native(source, name, args);
   }
+  // Services the action handler shares: forward fetching, quoted-message metadata and self-sent records.
+  receive.expandForward = expandForward;
+  receive.lookupRecent = lookupRecent;
+  receive.record = record;
   return receive;
 }
 

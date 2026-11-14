@@ -1,13 +1,12 @@
 {
   "name": "openqq",
   "version": "0.1.0",
-  "description": "OneBot v11 bridge for Windows QQ NT via Frida N-API instrumentation",
+  "description": "OneBot v11 bridge for Windows QQ NT with a C++ native bootstrap",
   "keywords": [
     "onebot",
     "onebot-v11",
     "qq",
     "qqnt",
-    "frida",
     "bot"
   ],
   "license": "AGPL-3.0-or-later",
@@ -25,7 +24,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "node ui/build.mjs",
+    "build": "npm run build:native && node ui/build.mjs",
+    "release": "node scripts/release.mjs",
     "prestart": "npm run build",
     "prewebui": "npm run build",
     "init": "node src/main.mjs init",
@@ -34,7 +34,9 @@
     "start": "node src/main.mjs start",
     "webui": "node src/main.mjs webui",
     "pretest": "npm run build",
-    "test": "node --test"
+    "test": "node --test",
+    "build:native": "node scripts/build-native.mjs",
+    "test:native": "npm run build:native && node --test test/native-bootstrap.test.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.4",
@@ -44,6 +46,7 @@
     "ws": "^8.23.0"
   },
   "devDependencies": {
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "javascript-obfuscator": "^5.10.1"
   }
 }

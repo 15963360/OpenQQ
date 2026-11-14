@@ -120,9 +120,17 @@ export function inspectQQ(root) {
     root, executable, wrapper, version: metadata.version, arch: metadata.eleArch,
     bytecode: metadata.isByteCodeShell === true, fuses, targetMatch, supported, missingExports,
     runtimeVerified: false,
-    bootstrap: 'frida-native',
+    bootstrap: 'cpp-native',
     inspectorDisabledBuildDiagnostic: runtimeBytes.includes(Buffer.from('Inspector is not available when Node is compiled --without-v8-platform and --without-inspector.\0')),
     runtimeSha256: createHash('sha256').update(runtimeBytes).digest('hex'),
     wrapperSha256: createHash('sha256').update(wrapperBytes).digest('hex'),
   };
+}
+
+export function bootstrapInput({ executable, wrapper, dll, payload, pipe, token }) {
+  for (const value of [executable, wrapper, dll, payload, pipe, token]) {
+    if (typeof value !== 'string' || !value || /[\0\r\n]/.test(value)) throw new Error('原生引导配置无效');
+  }
+  const source = `(() => { const load = typeof require === 'function' ? require : process.getBuiltinModule?.('module')?.createRequire(process.execPath) ?? process.mainModule?.require.bind(process.mainModule); if (!load) throw new Error('QQ 没有可用 CommonJS 入口'); try { return load(${JSON.stringify(payload)}).startNative(${JSON.stringify({ pipe, token })}, globalThis.__openqq_exports); } finally { delete globalThis.__openqq_exports; } })()`;
+  return [executable, wrapper, dll, source].join('\n') + '\n';
 }

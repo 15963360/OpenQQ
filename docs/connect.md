@@ -10,7 +10,7 @@ OpenQQ 通过 OneBot v11 正向 WebSocket 与反向 WebSocket 对外提供事件
 
 执行 `npm run webui`（首次无配置直接运行 `npm start` 也会自动进入），访问终端打印的完整 `#token=...` 地址完成配置：
 
-1. 在「环境概览 / 本地路径」步骤确认自动探测到的 QQ NT 目录和已安装 `frida>=17.8` 的 Python 路径，可点击「校验当前路径」实时检查 PE64 导出表与 Frida 版本。
+1. 在「环境概览 / 本地路径」步骤确认自动探测到的 QQ NT 目录和 C++ 原生引导器状态，可点击「重新检测」检查 PE64 导出表和原生组件。
 2. 选择 OneBot 连接模式：
    - **正向 WebSocket**：OpenQQ 监听本地端口（默认 `127.0.0.1:3001`），机器人客户端主动接入。
    - **反向 WebSocket**：OpenQQ 主动连接到最多 8 个外部服务端（`ws://` 或 `wss://`）。
@@ -24,7 +24,7 @@ OpenQQ 通过 OneBot v11 正向 WebSocket 与反向 WebSocket 对外提供事件
 npm run init
 ```
 
-或复制 `config/openqq.example.json` 为 `config/openqq.json` 后自行修改 `qqRoot`、`python` 和随机生成的 `accessToken`。
+或复制 `config/openqq.example.json` 为 `config/openqq.json` 后自行修改 `qqRoot` 和随机生成的 `accessToken`。
 
 > 如果将正向监听绑定到 `0.0.0.0` 允许局域网其他设备连接，请务必使用高强度 `accessToken` 并配合防火墙控制来源网段；WebUI 本身始终仅监听 `127.0.0.1`。
 

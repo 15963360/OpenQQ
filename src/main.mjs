@@ -4,8 +4,8 @@ import { mkdirSync, writeFileSync, renameSync, readFileSync, createWriteStream }
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { inspectQQ } from './qq.mjs';
-import { detectEnvironment, isQQProcessRunning, probePython, resolveExecutable } from './env.mjs';
+import { inspectQQ, bootstrapInput } from './qq.mjs';
+import { detectEnvironment, isQQProcessRunning, probeNative } from './env.mjs';
 import { createNativeChannel } from './ipc.mjs';
 import { createEventConverter } from './onebot.mjs';
 import { dispatchAction } from './actions.mjs';
@@ -20,7 +20,6 @@ const projectDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const runtimeDir = join(projectDir, '.runtime');
 const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   'qq-root': { type: 'string' },
-  python: { type: 'string' },
   'web-port': { type: 'string' },
   config: { type: 'string', default: join(projectDir, 'config', 'openqq.json') },
   json: { type: 'boolean', default: false },
@@ -45,26 +44,24 @@ function promptFor(paint, state) {
   return `${paint(style, '○')} ${paint('gray', label)} ${paint('cyan bold', '›')} `;
 }
 
-function checkClient(qq, python) {
+function checkClient(qq) {
   if (process.platform !== 'win32' || !qq.supported) {
     throw new Error('当前仅支持 Windows x64 QQ NT（需包含 qq_magic_napi_register 与 N-API 导出）');
   }
-  const pythonPath = resolveExecutable(python, 'python');
-  const probed = probePython(pythonPath);
-  if (!probed.exists) throw new Error(probed.error || '找不到 Frida Python，请检查配置中的解释器路径');
-  if (!probed.fridaOk) throw new Error(probed.error || '此 Python 需要安装 Frida 17.8 或更新版本（pip install -r requirements.txt）');
+  const native = probeNative(projectDir);
+  if (!native.ready) throw new Error(native.error);
   if (isQQProcessRunning()) throw new Error('请先手动退出 QQ，再由 OpenQQ 在原生模块加载前启动挂接');
-  return pythonPath;
+  return native;
 }
 
 async function start(qq, config, existingWebUI) {
-  const pythonPath = checkClient(qq, values.python);
+  const native = checkClient(qq);
   if (!qq.targetMatch) {
     out.log('warn', `当前 QQ 版本 ${qq.version} 未经过完整实机验证（已验证版本：9.9.33-52230），如遇异常请查看运行诊断`);
   }
   const channel = await createNativeChannel();
   const convert = createEventConverter();
-  let current = { phase: 'starting', version: qq.version, bootstrap: 'frida-native' };
+  let current = { phase: 'starting', version: qq.version, bootstrap: 'cpp-native' };
   let webui;
   let network;
   const execute = async (request, source) => {
@@ -138,13 +135,12 @@ async function start(qq, config, existingWebUI) {
   });
   channel.events.once('disconnected', finish);
   channel.events.on('failure', reject);
-  const driver = spawn(pythonPath, ['-X', 'utf8', join(projectDir, 'native/launch.py'), '--qq', qq.executable, '--config-stdin'], {
+  const driver = spawn(native.launcher, [], {
     windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
   });
   // Keep IPC token and pipe path out of process command-line arguments.
-  driver.stdin.write(JSON.stringify({
-    pipe: channel.path, token: channel.token, wrapper: qq.wrapper, payload: join(projectDir, 'native/session.cjs'),
-  }) + '\n');
+  driver.stdin.write(bootstrapInput({ executable: qq.executable, wrapper: qq.wrapper, dll: native.dll,
+    payload: join(projectDir, 'native/session.cjs'), pipe: channel.path, token: channel.token }));
   // QQ inherits the bootstrap's stdio, so its own console output arrives here as well: keep all of it in
   // .runtime/qq.log and show only OpenQQ's bootstrap stages (QQ lines appear with /verbose).
   for (const stream of [driver.stdout, driver.stderr]) {
@@ -176,6 +172,10 @@ async function start(qq, config, existingWebUI) {
     clearTimeout(startupTimeout);
     input.close();
     driver.stdin.end('stop\n');
+    // QQ keeps its log handles after bootstrap; release our ends so quitting can exit Node.
+    driver.stdout.destroy();
+    driver.stderr.destroy();
+    driver.unref();
     await channel.close();
     await network.close();
     process.removeListener('SIGINT', onSignal);
@@ -197,13 +197,12 @@ async function configurationWebUI(config, running = false) {
   webui = await startWebUI({ port: Number(values['web-port'] ?? config.webPort), status: { phase: savedConfig ? 'detached' : 'setup' }, configuration: {
     get: () => {
       const currentConfig = savedConfig ?? config;
-      const detected = detectEnvironment({ projectDir, qqRoot: currentConfig.qqRoot, python: currentConfig.python });
+      const detected = detectEnvironment({ projectDir, qqRoot: currentConfig.qqRoot });
       return { config: currentConfig, initialized: Boolean(savedConfig), running: webRunning, configPath: values.config, detected };
     },
     check: value => {
       const qqRoot = typeof value?.qqRoot === 'string' ? value.qqRoot.trim() : '';
-      const python = typeof value?.python === 'string' ? value.python.trim() : '';
-      return detectEnvironment({ projectDir, qqRoot, python });
+      return detectEnvironment({ projectDir, qqRoot });
     },
     save: value => {
       savedConfig = saveConfig(values.config, value);
@@ -213,9 +212,9 @@ async function configurationWebUI(config, running = false) {
       if (webRunning || !startFromWeb) throw new Error('框架已启动；配置修改后请在终端重启 npm start');
       if (!savedConfig) throw new Error('请先完成配置并保存');
       const qq = inspectQQ(savedConfig.qqRoot);
-      checkClient(qq, savedConfig.python);
+      checkClient(qq);
       // Clear 'setup' phase before the browser navigates to '/' so it is not bounced back to '/setup'.
-      webui.setStatus({ phase: 'starting', version: qq.version, bootstrap: 'frida-native' });
+      webui.setStatus({ phase: 'starting', version: qq.version, bootstrap: 'cpp-native' });
       webRunning = true;
       startFromWeb(savedConfig);
       return { message: '正在启动，请在 QQ 窗口登录，并返回会话控制台查看状态。' };
@@ -235,7 +234,6 @@ async function configureInBrowser(config) {
   try { selected = await pending; }
   finally { startFromWeb = null; process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop); }
   if (!selected) { await webui.close(); return; }
-  values.python = selected.python;
   try { await start(inspectQQ(selected.qqRoot), selected, webui); }
   finally { await webui.close(); }
 }
@@ -244,16 +242,14 @@ try {
   if (values['web-port'] !== undefined && (!/^\d+$/.test(values['web-port']) || Number(values['web-port']) > 65535)) throw new Error('--web-port 必须为 0..65535 的整数');
   const command = positionals[0] ?? 'doctor';
   savedConfig = readConfig(values.config);
-  const detectedForDefault = savedConfig ? null : detectEnvironment({ projectDir, qqRoot: values['qq-root'], python: values.python });
-  const config = savedConfig ?? defaultConfig({ qqRoot: detectedForDefault?.qq?.path, python: detectedForDefault?.python?.path });
+  const detectedForDefault = savedConfig ? null : detectEnvironment({ projectDir, qqRoot: values['qq-root'] });
+  const config = savedConfig ?? defaultConfig({ qqRoot: detectedForDefault?.qq?.path });
   if (values['qq-root']) config.qqRoot = values['qq-root'];
-  if (values.python) config.python = values.python;
   if (values['web-port'] && Number(values['web-port'])) config.webPort = Number(values['web-port']);
-  values.python = config.python;
   if (command === 'init') await setupCLI(values.config, config);
   else if (command === 'webui' || (command === 'start' && !savedConfig)) await configureInBrowser(config);
   else if (command === 'doctor') {
-    const env = detectEnvironment({ projectDir, qqRoot: values['qq-root'] ?? savedConfig?.qqRoot, python: values.python });
+    const env = detectEnvironment({ projectDir, qqRoot: values['qq-root'] ?? savedConfig?.qqRoot });
     let inspected = null;
     if (env.qq?.path) {
       try { inspected = inspectQQ(env.qq.path); } catch (error) { inspected = { error: error.message }; }

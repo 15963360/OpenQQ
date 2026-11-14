@@ -7,7 +7,7 @@ import { useAPI } from './api.jsx';
 
 const steps = [
   ['开始之前', '检查本机环境。启动桥接前，请先完全退出正在运行的 QQ。'],
-  ['客户端', '确认 QQ NT 安装目录，以及已安装 Frida 的 Python。'],
+  ['客户端', '确认 QQ NT 安装目录和原生引导器。'],
   ['连接方式', '选择机器人与 OpenQQ 的通信方式，可以同时启用。'],
   ['访问密钥', '机器人端需要填写相同的 Access Token。'],
   ['确认配置', '确认无误后保存到本机配置文件。'],
@@ -24,7 +24,7 @@ const modes = [
 function Probe({ detected, checking, onCheck }) {
   const items = [
     { name: 'QQ 客户端', good: detected?.qq?.valid, text: detected?.qq?.version ? 'QQ ' + detected.qq.version : '未检测到', detail: detected?.qq?.error },
-    { name: 'Python / Frida', good: detected?.python?.fridaOk, text: detected?.python?.fridaOk ? 'Frida ' + detected.python.fridaVersion : '未就绪', detail: detected?.python?.error },
+    { name: 'C++ 原生引导器', good: detected?.native?.ready, text: detected?.native?.ready ? '已就绪' : '未就绪', detail: detected?.native?.error },
     { name: 'QQ 进程', good: detected ? !detected.qqRunning : false, text: detected ? detected.qqRunning ? '正在运行，请先退出' : '未运行' : '等待检测' },
   ];
   return <div className="checklist">
@@ -60,13 +60,13 @@ export default function Setup() {
   function move(next) { setError(''); setStep(next); setHighest(previous => Math.max(previous, next)); setRevision(previous => previous + 1); }
   function draft() {
     const value = form.getFieldsValue(true);
-    return { version: 1, qqRoot: value.qqRoot?.trim() || '', python: value.python?.trim() || '', webPort: value.webPort,
+    return { version: 1, qqRoot: value.qqRoot?.trim() || '', webPort: value.webPort,
       accessToken: value.accessToken || '', ws: { enabled: mode !== 'reverse', host: value.ws?.host || '127.0.0.1', port: value.ws?.port || 3001 },
       reverseWs: (value.reverseWs || []).filter(item => item?.url?.trim()).map(item => ({ enabled: mode !== 'forward' && Boolean(item.enabled), url: item.url.trim(), token: item.token || '' })) };
   }
   async function check() {
     setChecking(true); setError('');
-    try { const values = form.getFieldsValue(true); const value = await request('/api/check', { qqRoot: values.qqRoot?.trim(), python: values.python?.trim() }); setDetected(value); return value; }
+    try { const values = form.getFieldsValue(true); const value = await request('/api/check', { qqRoot: values.qqRoot?.trim() }); setDetected(value); return value; }
     catch (error) { setError(error.message); return null; }
     finally { setChecking(false); }
   }
@@ -75,9 +75,9 @@ export default function Setup() {
     setError(''); setBusy(true);
     try {
       if (step === 1) {
-        await form.validateFields(['qqRoot', 'python']);
+        await form.validateFields(['qqRoot']);
         const result = await check();
-        if (!result?.qq?.valid || !result?.python?.fridaOk) throw new Error('QQ 或 Python 环境尚未就绪，请检查路径和检测结果。');
+        if (!result?.qq?.valid || !result?.native?.ready) throw new Error('QQ 或原生引导器尚未就绪，请检查检测结果。');
       }
       if (step === 2) {
         await form.validateFields(mode === 'reverse' ? ['reverseWs'] : mode === 'both' ? ['ws', 'reverseWs'] : ['ws'], { recursive: true });
@@ -106,7 +106,7 @@ export default function Setup() {
   async function copy(value) { try { await navigator.clipboard.writeText(value); message.success('已复制'); } catch { message.error('复制失败，请手动选择文本'); } }
   const snapshot = config ? draft() : null;
   const forwardAddress = `ws://${host === '0.0.0.0' ? '<局域网 IP>' : '127.0.0.1'}:${port}/`;
-  const review = snapshot ? [['QQ 安装目录', snapshot.qqRoot], ['Python', snapshot.python], ['连接方式', modes.find(item => item.value === mode).title],
+  const review = snapshot ? [['QQ 安装目录', snapshot.qqRoot], ['连接方式', modes.find(item => item.value === mode).title],
     ...(snapshot.ws.enabled ? [['正向地址', forwardAddress]] : []), ...snapshot.reverseWs.filter(item => item.enabled).map((item, i) => ['反向地址 ' + (i + 1), item.url]),
     ['Access Token', '已设置 · ' + snapshot.accessToken.length + ' 位'], ['WebUI 端口', snapshot.webPort]] : [];
   const action = step === 0 ? '开始' : step === 4 ? '保存配置' : step === 5 ? running ? '进入控制台' : '启动 OpenQQ' : '下一步';
@@ -139,8 +139,6 @@ export default function Setup() {
               {step === 1 && <>
                 <Form.Item name="qqRoot" label="QQ 安装目录" rules={required} extra={detected?.qq?.valid ? `已识别 QQ ${detected.qq.version || ''}` : detected?.qq?.error || 'QQ NT 的安装目录'}><Input spellCheck={false} /></Form.Item>
                 {detected?.qqCandidates?.length > 0 && <div className="chips">{detected.qqCandidates.map(item => <Tooltip key={item.path} title={item.path}><Button size="small" onClick={() => form.setFieldValue('qqRoot', item.path)}>{item.version || item.path}</Button></Tooltip>)}</div>}
-                <Form.Item name="python" label="Python 可执行文件" rules={required} extra={detected?.python?.fridaOk ? `Python ${detected.python.pythonVersion || ''} · Frida ${detected.python.fridaVersion}` : '需要安装 Frida 17.8 或更新版本'}><Input spellCheck={false} /></Form.Item>
-                {detected?.pythonCandidates?.length > 0 && <div className="chips">{detected.pythonCandidates.map(item => <Tooltip key={item.path} title={item.path}><Button size="small" onClick={() => form.setFieldValue('python', item.path)}>{item.path.split(/[\\/]/).slice(-3).join('/')}{item.fridaOk ? ' ✓' : ''}</Button></Tooltip>)}</div>}
                 <Button size="small" loading={checking} onClick={check} icon={<ReloadOutlined />}>校验路径</Button>
               </>}
 

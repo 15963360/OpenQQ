@@ -9,7 +9,7 @@ import { describeEntry, identifier, messageRequest } from './format.mjs';
 const phases = { detached: '未接入', starting: '正在启动', hook_installed: '等待登录', session_ready: '会话就绪', offline: '已掉线', failed: '启动失败', hook_error: '接入异常' };
 const types = { message: '消息', notice: '通知', request: '请求', action: '动作', diagnostic: '诊断' };
 const time = value => new Date(value).toLocaleTimeString('zh-CN', { hour12: false });
-const templates = ['get_login_info', 'get_status', 'send_private_msg', 'send_group_msg', 'set_input_status'];
+const templates = ['get_login_info', 'get_status', 'send_private_msg', 'send_group_msg', 'set_input_status', 'get_forward_msg'];
 const reverseNames = { waiting: '等待 QQ', connecting: '连接中', connected: '已连接', reconnecting: '重连中' };
 
 function Pill({ tone = 'neutral', children }) { return <span className={'pill pill-' + tone}>{children}</span>; }
@@ -41,7 +41,7 @@ function Composer({ ready, state, form }) {
     } finally { setBusy(false); }
   };
   function template(action) {
-    const value = { action, ...(action.startsWith('send_') ? { params: { [action === 'send_group_msg' ? 'group_id' : 'user_id']: '', message: '', auto_escape: true } } : action === 'set_input_status' ? { params: { user_id: '', event_type: 1 } } : {}), echo: 'webui' };
+    const value = { action, ...(action.startsWith('send_') ? { params: { [action === 'send_group_msg' ? 'group_id' : 'user_id']: '', message: '', auto_escape: true } } : action === 'set_input_status' ? { params: { user_id: '', event_type: 1 } } : action === 'get_forward_msg' ? { params: { id: '' } } : {}), echo: 'webui' };
     form.setFieldValue('jsonAction', JSON.stringify(value, null, 2));
   }
   return <aside className="side">

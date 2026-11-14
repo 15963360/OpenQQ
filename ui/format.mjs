@@ -1,8 +1,12 @@
 export function segmentText(message) {
   if (typeof message === 'string') return message;
-  const labels = { image: '图片', face: '表情', record: '语音', video: '视频', file: '文件', reply: '回复', json: '卡片', xml: '卡片', markdown: 'Markdown', mface: '商城表情' };
+  const labels = { image: '图片', face: '表情', record: '语音', video: '视频', file: '文件', reply: '回复', json: '应用', xml: '卡片', markdown: 'Markdown', mface: '商城表情', forward: '合并转发' };
+  const app = raw => { try { const card = typeof raw === 'string' ? JSON.parse(raw) : raw; return String(card?.prompt || card?.app || '').slice(0, 60); } catch { return ''; } };
   return (Array.isArray(message) ? message : []).map(item => item?.type === 'text' ? String(item.data?.text ?? '')
-    : item?.type === 'at' ? '@' + String(item.data?.qq ?? '') : '[' + (labels[item?.type] || item?.type || '消息') + ']').join('');
+    : item?.type === 'at' ? '@' + String(item.data?.qq ?? '')
+    : item?.type === 'json' && app(item.data?.data) ? `[应用 ${app(item.data.data)}]`
+    : item?.type === 'forward' && Array.isArray(item.data?.content) ? `[合并转发 ${item.data.content.length} 条]`
+    : '[' + (labels[item?.type] || item?.type || '消息') + ']').join('');
 }
 
 export function describeEntry(entry) {
