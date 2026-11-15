@@ -50,7 +50,7 @@ export function DropdownMenuItem({ className, destructive, ...props }: Component
 export function DropdownMenuRadioItem({ className, children, ...props }: ComponentProps<typeof Menu.RadioItem>) {
   return <Menu.RadioItem className={cn(item, 'pr-8', className)} {...props}>
     {children}
-    <Menu.ItemIndicator className="absolute right-2 inline-flex"><Check className="!text-primary" /></Menu.ItemIndicator>
+    <Menu.ItemIndicator className="absolute right-2 inline-flex"><Check className="!text-foreground" /></Menu.ItemIndicator>
   </Menu.RadioItem>;
 }
 

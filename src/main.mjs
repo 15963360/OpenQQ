@@ -4,11 +4,12 @@ import { mkdirSync, writeFileSync, renameSync, readFileSync, createWriteStream }
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { inspectQQ, bootstrapInput } from './qq.mjs';
+import { inspectQQ, bootstrapInput, verifiedVersions } from './qq.mjs';
 import { detectEnvironment, isQQProcessRunning, probeNative } from './env.mjs';
 import { createNativeChannel } from './ipc.mjs';
 import { createEventConverter } from './onebot.mjs';
 import { dispatchAction } from './actions.mjs';
+import { createMediaPreparer } from './media.mjs';
 import { startCommandInput, inputHelp } from './input.mjs';
 import { createConsole } from './console.mjs';
 import { startWebUI } from './webui.mjs';
@@ -57,16 +58,19 @@ function checkClient(qq) {
 async function start(qq, config, existingWebUI) {
   const native = checkClient(qq);
   if (!qq.targetMatch) {
-    out.log('warn', `当前 QQ 版本 ${qq.version} 未经过完整实机验证（已验证版本：9.9.33-52230），如遇异常请查看运行诊断`);
+    out.log('warn', `当前 QQ 版本 ${qq.version} 未经过完整实机验证（已验证版本：${verifiedVersions.join('、')}），如遇异常请查看运行诊断`);
   }
   const channel = await createNativeChannel();
   const convert = createEventConverter();
+  // Sources of image / voice / video / file segments (local path, base64, URL) are fetched into this folder before sending.
+  const media = createMediaPreparer({ dir: join(runtimeDir, 'media') });
+  media.sweep().catch(() => {});
   let current = { phase: 'starting', version: qq.version, bootstrap: 'cpp-native' };
   let webui;
   let network;
   const execute = async (request, source) => {
     const started = performance.now();
-    const response = await dispatchAction(channel, convert, request);
+    const response = await dispatchAction(channel, convert, request, { media, version: pkg.version });
     webui?.publish('action', { request, response, source, elapsed: Math.round(performance.now() - started) });
     // Terminal actions are printed by the input loop; external actions are mirrored here.
     if (source !== 'terminal') out.action(request, response, source);

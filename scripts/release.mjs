@@ -1,7 +1,6 @@
 import { build } from 'esbuild';
-import JavaScriptObfuscator from 'javascript-obfuscator';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildUI } from '../ui/build.mjs';
@@ -12,56 +11,6 @@ const releaseName = `${pkg.name}-v${pkg.version}-win-x64`;
 const distRoot = join(root, 'dist');
 const releaseDir = join(distRoot, releaseName);
 const archivePath = join(distRoot, `${releaseName}.zip`);
-
-const nodeObfuscationOptions = {
-  compact: true,
-  controlFlowFlattening: true,
-  controlFlowFlatteningThreshold: 0.5,
-  deadCodeInjection: true,
-  deadCodeInjectionThreshold: 0.2,
-  identifierNamesGenerator: 'hexadecimal',
-  numbersToExpressions: true,
-  renameGlobals: false,
-  selfDefending: false,
-  simplify: true,
-  splitStrings: true,
-  splitStringsChunkLength: 8,
-  stringArray: true,
-  stringArrayCallsTransform: true,
-  stringArrayEncoding: ['rc4'],
-  stringArrayIndexShift: true,
-  stringArrayRotate: true,
-  stringArrayShuffle: true,
-  stringArrayWrappersCount: 2,
-  stringArrayWrappersType: 'function',
-  target: 'node',
-};
-
-const uiObfuscationOptions = {
-  compact: true,
-  controlFlowFlattening: false,
-  deadCodeInjection: false,
-  identifierNamesGenerator: 'hexadecimal',
-  numbersToExpressions: false,
-  renameGlobals: false,
-  selfDefending: false,
-  simplify: true,
-  splitStrings: true,
-  splitStringsChunkLength: 10,
-  stringArray: true,
-  stringArrayCallsTransform: true,
-  stringArrayEncoding: ['rc4'],
-  stringArrayIndexShift: true,
-  stringArrayRotate: true,
-  stringArrayShuffle: true,
-  stringArrayWrappersCount: 2,
-  stringArrayWrappersType: 'function',
-  target: 'browser-no-eval',
-};
-
-function obfuscateJS(code, options) {
-  return JavaScriptObfuscator.obfuscate(code, options).getObfuscatedCode();
-}
 
 function writeOut(relPath, content) {
   const fullPath = join(releaseDir, relPath);
@@ -99,6 +48,9 @@ function createReleaseMetadata() {
   copyOut('native/bin/openqq-launch.exe');
   copyOut('native/bin/openqq-bootstrap.dll');
   copyOut('LICENSE');
+  // Optional voice encoder (MIT): shipped when installed, so WAV can be sent as a voice message without extra setup.
+  const silkDir = join(root, 'node_modules', 'silk-wasm');
+  if (existsSync(silkDir)) cpSync(silkDir, join(releaseDir, 'node_modules', 'silk-wasm'), { recursive: true });
 
   writeOut('openqq.cmd', [
     '@echo off',
@@ -162,8 +114,8 @@ async function main() {
     legalComments: 'none',
     banner: { js: 'import { createRequire as __openqqCreateRequire } from "node:module"; const require = __openqqCreateRequire(import.meta.url);' },
   });
-  const mainObf = obfuscateJS(mainBundle.outputFiles[0].text, nodeObfuscationOptions);
-  writeOut('src/main.mjs', mainObf);
+  const mainOut = mainBundle.outputFiles[0].text;
+  writeOut('src/main.mjs', mainOut);
 
   // 2. Native QQ session payload (CJS bundle loaded inside QQNT's Node runtime).
   const sessionBundle = await build({
@@ -178,13 +130,14 @@ async function main() {
     legalComments: 'none',
     external: ['node:*'],
   });
-  const sessionObf = obfuscateJS(sessionBundle.outputFiles[0].text, nodeObfuscationOptions);
-  writeOut('native/session.cjs', sessionObf);
+  const sessionOut = sessionBundle.outputFiles[0].text;
+  writeOut('native/session.cjs', sessionOut);
 
   // 3. WebUI assets.
-  await buildUI({ outdir: join(releaseDir, 'web'), transform: code => obfuscateJS(code, uiObfuscationOptions), logLevel: 'warning' });
+  await buildUI({ outdir: join(releaseDir, 'web'), logLevel: 'warning' });
   copyOut('web/index.html', 'web/index.html');
   copyOut('web/setup.html', 'web/setup.html');
+  copyOut('web/logo.svg', 'web/logo.svg');
 
   // 4. Runtime package metadata, launchers and zip archive.
   createReleaseMetadata();
@@ -194,8 +147,8 @@ async function main() {
   console.log(`Release built in ${Date.now() - started}ms:`);
   console.log(`  Dir:  ${releaseDir}`);
   console.log(`  Zip:  ${archivePath} (${kb(statSync(archivePath).size)})`);
-  console.log(`  src/main.mjs:       ${kb(Buffer.byteLength(mainObf))}`);
-  console.log(`  native/session.cjs: ${kb(Buffer.byteLength(sessionObf))}`);
+  console.log(`  src/main.mjs:       ${kb(Buffer.byteLength(mainOut))}`);
+  console.log(`  native/session.cjs: ${kb(Buffer.byteLength(sessionOut))}`);
   console.log(`  web/app.js:         ${kb(statSync(join(releaseDir, 'web/app.js')).size)}`);
 }
 

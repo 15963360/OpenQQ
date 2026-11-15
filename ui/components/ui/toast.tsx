@@ -25,7 +25,7 @@ export async function copyText(value: string, label = '已复制到剪贴板') {
 }
 
 const icons = { success: CircleCheck, error: CircleAlert, info: Info };
-const colors = { success: 'text-success', error: 'text-destructive', info: 'text-primary' };
+const colors = { success: 'text-success', error: 'text-destructive', info: 'text-foreground' };
 
 export function Toaster() {
   const items = useToasts(state => state.items);

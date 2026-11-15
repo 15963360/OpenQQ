@@ -1,12 +1,8 @@
 import { cn } from '../lib/utils';
 
+// The mark is the same file the page uses as its favicon (/logo.svg), so there is one drawing to maintain.
 export function BrandMark({ className }: { className?: string }) {
-  return <span className={cn('brand-mark grid size-6 shrink-0 place-items-center rounded-[7px] bg-primary text-primary-foreground shadow-sm', className)} aria-hidden>
-    <svg viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <circle cx="7.5" cy="7.5" r="4.75" />
-      <path d="M10.5 10.5 13 13" />
-    </svg>
-  </span>;
+  return <img src="/logo.svg" alt="" draggable={false} className={cn('brand-mark size-6 shrink-0 rounded-[6px] shadow-sm', className)} />;
 }
 
 export function Brand({ compact, className }: { compact?: boolean; className?: string }) {

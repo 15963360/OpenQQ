@@ -14,7 +14,7 @@ const fonts = [
 ];
 
 // Builds the console into `outdir`: app.js (esbuild), app.css (Tailwind), theme.css (tokens) and fonts.
-// `transform` post-processes the JavaScript bundle (the release script obfuscates it).
+// `transform` post-processes the JavaScript bundle.
 export async function buildUI({ outdir = join(root, 'web'), transform = code => code, logLevel = 'info' } = {}) {
   await mkdir(join(outdir, 'fonts'), { recursive: true });
   const result = await build({ absWorkingDir: root, entryPoints: ['ui/main.tsx'], outfile: join(outdir, 'app.js'),

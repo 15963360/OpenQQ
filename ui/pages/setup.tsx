@@ -172,7 +172,7 @@ export default function Setup() {
           <button type="button" disabled={!reachable} aria-current={current ? 'step' : undefined} onClick={() => reachable && move(index)}
             className={cn('flex w-full items-center gap-3 rounded-lg p-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring lg:px-2.5 lg:py-2', reachable && !current && 'hover:bg-muted', current && 'lg:bg-card lg:shadow-sm lg:ring-1 lg:ring-border dark:lg:bg-elevated dark:lg:ring-transparent')}>
             <span className={cn('grid size-6 shrink-0 place-items-center rounded-full border text-2xs font-semibold transition-colors',
-              current ? 'border-primary bg-primary text-primary-foreground' : done ? 'border-primary/30 bg-accent text-accent-foreground' : 'bg-muted text-muted-foreground')}>
+              current ? 'border-foreground bg-foreground text-background' : done ? 'border-border-strong bg-muted text-foreground' : 'bg-muted text-muted-foreground')}>
               {done && !current ? <Check className="size-3.5" aria-hidden /> : index + 1}
             </span>
             <span className={cn('hidden truncate text-sm lg:block', current ? 'font-medium text-foreground' : done ? 'text-secondary-foreground' : 'text-muted-foreground')}>{title}</span>
@@ -210,9 +210,9 @@ export default function Setup() {
                 <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="连接方式">
                   {modes.map(item => <button type="button" role="radio" aria-checked={mode === item.value} key={item.value} onClick={() => chooseMode(item.value)}
                     className={cn('grid gap-1 rounded-lg border p-3.5 text-left outline-none transition-[border-color,box-shadow,background-color] focus-visible:ring-2 focus-visible:ring-ring',
-                      mode === item.value ? 'border-primary bg-accent/50 ring-1 ring-primary' : 'hover:border-border-strong hover:bg-muted/40')}>
+                      mode === item.value ? 'border-foreground bg-muted/50 ring-1 ring-foreground' : 'hover:border-border-strong hover:bg-muted/40')}>
                     <span className="flex items-center gap-2 text-sm font-medium">
-                      <span className={cn('grid size-4 place-items-center rounded-full border', mode === item.value ? 'border-primary' : 'border-border-strong')}>{mode === item.value && <span className="size-2 rounded-full bg-primary" />}</span>
+                      <span className={cn('grid size-4 place-items-center rounded-full border', mode === item.value ? 'border-foreground' : 'border-border-strong')}>{mode === item.value && <span className="size-2 rounded-full bg-foreground" />}</span>
                       {item.title}
                     </span>
                     <span className="text-xs text-muted-foreground">{item.note}</span>

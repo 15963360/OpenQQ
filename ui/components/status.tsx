@@ -32,7 +32,7 @@ export const reverseMeta: Record<string, StatusMeta> = {
 };
 
 const dotColor: Record<Tone, string> = {
-  success: 'bg-success', warning: 'bg-warning', destructive: 'bg-destructive', neutral: 'bg-muted-foreground/60', primary: 'bg-primary', outline: 'bg-muted-foreground/60',
+  success: 'bg-success', warning: 'bg-warning', destructive: 'bg-destructive', neutral: 'bg-muted-foreground/60', primary: 'bg-foreground', outline: 'bg-muted-foreground/60',
 };
 const toneIcon: Record<Tone, LucideIcon> = {
   success: CircleCheck, warning: LoaderCircle, destructive: CircleAlert, neutral: CircleDot, primary: CircleDot, outline: CircleDot,

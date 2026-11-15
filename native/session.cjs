@@ -41,7 +41,7 @@ function createSessionHook(report) {
       const current = () => active && attached.get(session) === attachment;
       const receive = createEventReceiver(session, self, emit, current);
       attachment.actions = createActionHandler(session, self, current, {
-        expandForward: receive.expandForward, lookupRecent: receive.lookupRecent, record: receive.record,
+        expandForward: receive.expandForward, lookupRecent: receive.lookupRecent, record: receive.record, groups: receive.groups,
       });
       for (const [source, getter, add, remove] of [
         ['msg', 'getMsgService', 'addKernelMsgListener', 'removeKernelMsgListener'],
@@ -127,7 +127,7 @@ function createSessionHook(report) {
   }
 
   function hookWrapper(wrapper) {
-    // shortcut: observes factory-created sessions; add constructor interception if a QQ build constructs them directly.
+    // Only sessions made by the factory are seen. A QQ build that constructs them directly would need a constructor hook.
     const originalFactory = wrapper?.NodeIQQNTWrapperSession;
     if (!originalFactory || !['object', 'function'].includes(typeof originalFactory)) {
       emit({ type: 'hook_error', stage: 'factory', error: '未找到会话工厂导出' });

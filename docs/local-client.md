@@ -6,20 +6,20 @@
 
 在配置校验、`npm run doctor` 以及启动前的 `inspectQQ()`（位于 `src/qq.mjs`）阶段，OpenQQ 会对目标安装目录执行以下只读检查：
 
-1. **目录与版本元数据**：验证目录下存在 `QQ.exe`、`QQNT.dll`、`resources/app/package.json`、`versions/config.json`，以及当前活动版本目录下的 `wrapper.node`。
+1. **目录与版本元数据**：安装根目录下要有 `QQ.exe` 和 `versions/config.json`；当前版本目录 `versions/<版本>/` 下要有 `QQNT.dll`、`resources/app/package.json` 和 `resources/app/wrapper.node`。`package.json` 里的版本必须与 `versions/config.json` 的 `curVersion` 一致，`eleArch` 必须是 `x64`。
 2. **目录结构校验**：验证活动资源目录及入口指针均解析在 QQ 安装根目录以内，防止路径逃逸。
 3. **x64 PE 导出表解析（`readPE64Info`）**：
    - 解析 `QQNT.dll` 的 PE32+ 头确认架构为 `x64`（`Machine === 0x8664`），并读取导出表验证包含关键符号：
      - `qq_magic_napi_register`
-     - `napi_create_function`
-     - `napi_set_named_property`
-     - `napi_get_named_property`
+     - `napi_get_global`、`napi_set_named_property`、`napi_create_string_utf8`、`napi_run_script`
+     - `napi_open_escapable_handle_scope`、`napi_close_escapable_handle_scope`、`napi_escape_handle`
+     - `napi_is_exception_pending`、`napi_get_and_clear_last_exception`
    - 解析当前版本目录下的 `wrapper.node` 确认同样为有效的 `x64` 二进制文件。
-4. **Electron Fuses 只读状态**：支持读取 `QQ.exe` 中的 `electron_fuses` 标志位，用于诊断客户端运行时安全选项，读取异常时降级为空而不中断正常启动探测。
+4. **Electron Fuses 只读状态**：支持读取 `QQNT.dll` 中的 `electron_fuses` 标志位，用于诊断客户端运行时安全选项，读取异常时降级为空而不中断正常启动探测。
 
 ### 版本兼容策略
 
-- **基准实机验证版本**：`9.9.33-52230`（`targetMatch: true`）。
+- **已测试版本**：`9.9.33-52230`、`9.9.37-54395`（`targetMatch: true`）。
 - **其他 Windows x64 QQ NT 9.x 构建**：只要满足 `x64` 架构并包含上述所需 N-API 导出和 `qq_magic_napi_register`，即判定为 `supported: true` 允许启动，启动时会输出非基准版本提示，提醒结合运行诊断或 WebUI 核对事件收发情况。
 
 ## N-API 原生挂接机制

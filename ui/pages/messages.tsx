@@ -57,7 +57,7 @@ function ConversationList({ conversations, active, onNew }: { conversations: Con
               </span>
               <span className="flex items-center gap-2">
                 <span className="truncate text-xs text-muted-foreground">{last ? (item.type === 'group' && last.direction === 'in' ? last.senderName + '：' : last.direction === 'out' ? '我：' : '') + last.text : '暂无消息'}</span>
-                {item.unread > 0 && <span className="tabular ml-auto min-w-5 shrink-0 rounded-full bg-primary px-1.5 text-center text-2xs font-semibold leading-5 text-primary-foreground" aria-label={item.unread + ' 条未读'}>{item.unread > 99 ? '99+' : item.unread}</span>}
+                {item.unread > 0 && <span className="tabular ml-auto min-w-5 shrink-0 rounded-full bg-foreground px-1.5 text-center text-2xs font-semibold leading-5 text-background" aria-label={item.unread + ' 条未读'}>{item.unread > 99 ? '99+' : item.unread}</span>}
               </span>
             </span>
           </button>
@@ -77,7 +77,7 @@ function MessageItem({ message, grouped, showSender, onRetry }: { message: ChatM
       {showSender && !out && message.senderId && <span className="tabular font-mono text-2xs text-muted-foreground">{message.senderId}</span>}
       <time className="tabular text-2xs text-muted-foreground" dateTime={message.time}>{formatTime(message.time)}</time>
     </div>}
-    <div className={cn('max-w-[min(560px,85%)] rounded-2xl px-3.5 py-2 text-sm leading-relaxed', out ? 'rounded-br-md border border-primary/15 bg-accent text-foreground' : 'rounded-bl-md border bg-card')}>
+    <div className={cn('max-w-[min(560px,85%)] rounded-2xl px-3.5 py-2 text-sm leading-relaxed', out ? 'rounded-br-md border bg-muted text-foreground' : 'rounded-bl-md border bg-card')}>
       <Segments segments={message.segments} />
     </div>
     {out && <div className="mt-1 flex items-center gap-1.5 px-1 text-2xs text-muted-foreground" aria-live="polite">

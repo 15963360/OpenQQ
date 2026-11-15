@@ -27,6 +27,9 @@ interface Preferences {
   setCompact(value: boolean): void;
   collapsedGroups: string[];
   toggleGroup(id: string): void;
+  /** Debug-level diagnostics are hidden on the logs page unless the viewer opts in (like /verbose in the terminal). */
+  showDebugLogs: boolean;
+  setShowDebugLogs(value: boolean): void;
 }
 
 export const usePreferences = create<Preferences>((set, get) => ({
@@ -47,6 +50,8 @@ export const usePreferences = create<Preferences>((set, get) => ({
     write('openqq-groups', next.join(',') || null);
     set({ collapsedGroups: next });
   },
+  showDebugLogs: read('openqq-debug-logs') === 'show',
+  setShowDebugLogs(value) { write('openqq-debug-logs', value ? 'show' : null); set({ showDebugLogs: value }); },
 }));
 
 media.addEventListener('change', () => {

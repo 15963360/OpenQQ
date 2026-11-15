@@ -25,7 +25,7 @@ export function Segments({ segments, className }: { segments: Segment[]; classNa
     {segments.map((segment, index) => {
       const data = segment.data ?? {};
       if (segment.type === 'text') return <span key={index}>{String(data.text ?? '')}</span>;
-      if (segment.type === 'at') return <Chip key={index} icon={AtSign} className="border-primary/20 bg-accent text-accent-foreground">{data.qq === 'all' ? '全体成员' : String(data.qq ?? '')}</Chip>;
+      if (segment.type === 'at') return <Chip key={index} icon={AtSign} className="border-border bg-muted font-medium text-foreground">{data.qq === 'all' ? '全体成员' : String(data.qq ?? '')}</Chip>;
       if (segment.type === 'reply') return <Chip key={index} icon={Reply}>回复 #{String(data.id ?? '')}</Chip>;
       const [label, icon] = media[segment.type] ?? ['消息段 ' + segment.type, LayoutTemplate];
       const extra = segment.type === 'json' ? appName(data.data)

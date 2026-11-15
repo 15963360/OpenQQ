@@ -7,14 +7,35 @@ const now = () => Math.floor(Date.now() / 1000);
 const FORWARD_DEPTH = 3;
 const FORWARD_LIMIT = 200;
 const FORWARD_BYTES = 512 * 1024;
+// A member who just joined or left is often unknown to every UID store until QQ pushes the refreshed member list.
+const MEMBER_RETRY_MS = 1500;
 
-function createEventReceiver(session, self, report, current) {
+function createEventReceiver(session, self, report, current, { memberRetryMs = MEMBER_RETRY_MS } = {}) {
   const cache = new Map();
   const seenShapes = new Set();
   const members = new Map();
   const started = now();
   let friends;
   let syncing = true;
+  // Groups QQ has told us about, for get_group_list / get_group_info. QQ answers a refresh through the group listener.
+  const groups = { map: new Map(), version: 0 };
+  const groupWaiters = new Set();
+  groups.waitForUpdate = (since, ms) => new Promise(resolve => {
+    const finish = () => { clearTimeout(timer); groupWaiters.delete(finish); resolve(); };
+    const timer = setTimeout(finish, ms);
+    groupWaiters.add(finish);
+    if (groups.version !== since) finish();
+  });
+  function updateGroups(type, list) {
+    if (!Array.isArray(list)) return;
+    for (const item of list) {
+      if (!item || !/^\d+$/.test(String(item.groupCode))) continue;
+      if (type === 3) groups.map.delete(String(item.groupCode));
+      else groups.map.set(String(item.groupCode), item);
+    }
+    groups.version++;
+    for (const finish of [...groupWaiters]) finish();
+  }
   const remember = (uid, uin) => {
     if (uid && validUin(uin)) cache.set(uid, String(uin));
     if (cache.size > 10000) cache.delete(cache.keys().next().value);
@@ -44,6 +65,16 @@ function createEventReceiver(session, self, report, current) {
       if (!current()) throw error;
       emit({ type: 'event_error', stage, error: error.message + '，已按未知处理并继续上报' });
       return undefined;
+    }
+  }
+  // The subject of a membership notice gets one delayed retry (member list pushes fill the cache meanwhile),
+  // then degrades to unknown like an operator, so the join/leave itself is still reported.
+  async function memberUin(uid, stage) {
+    try { return await uin(uid); }
+    catch (error) {
+      if (!current()) throw error;
+      await new Promise(resolve => setTimeout(resolve, memberRetryMs));
+      return optionalUin(uid, stage);
     }
   }
 
@@ -267,7 +298,8 @@ function createEventReceiver(session, self, report, current) {
       if ([1, 5, 7].includes(item.type) && item.status === 1) {
         emit({ type: 'request', self, key, time, event: { request_type: 'group', group_id,
           sub_type: item.type === 1 ? 'invite' : 'add', user_id: await uin(item.type === 1 ? item.user2?.uid : item.user1?.uid),
-          comment: String(item.postscript ?? ''), flag: String(item.seq),
+          // The flag carries everything set_group_add_request needs to answer this notification.
+          comment: String(item.postscript ?? ''), flag: `g:${group_id}:${item.type}:${item.seq}`,
         } });
       } else native('group', 'onGroupNotifiesUpdated', [item]);
     }, 'group/notifies');
@@ -289,13 +321,18 @@ function createEventReceiver(session, self, report, current) {
         if (!event) { native(source, name, args); return; }
         const { user_uid, operator_uid, ...fields } = event.event;
         if (!user_uid && fields.openqq_reason !== 'disband') throw new Error('系统通知缺少成员 UID');
-        fields.user_id = await uin(user_uid || self.uid);
+        const member = await memberUin(user_uid || self.uid, `${source}/${name}/member`);
+        fields.user_id = member ?? 0;
+        if (!member) fields.openqq_user_unknown = true;
         if (operator_uid) {
           // A missing operator mapping must not discard the membership change itself.
           const operator = await optionalUin(operator_uid, `${source}/${name}/operator`);
           fields.operator_id = operator ?? 0;
           if (!operator) fields.openqq_operator_unknown = true;
-        } else if (fields.notice_type === 'group_decrease' && fields.sub_type === 'leave') fields.operator_id = fields.user_id;
+        } else if (fields.notice_type === 'group_decrease' && fields.sub_type === 'leave') {
+          fields.operator_id = fields.user_id;
+          if (!member) fields.openqq_operator_unknown = true;
+        }
         if (fields.notice_type === 'group_decrease' && fields.sub_type === 'kick' && fields.user_id === self.uin) fields.sub_type = 'kick_me';
         notice(fields, event.key, event.time);
         return;
@@ -314,9 +351,17 @@ function createEventReceiver(session, self, report, current) {
       }
     }
     if (source === 'group') {
+      if (name === 'onGroupListUpdate') { updateGroups(args[0], args[1]); return; }
       if (name === 'onGroupNotifiesUpdated') return groupNotifies(args[1]);
       if (name === 'onGroupNotifiesUpdatedV2') return groupNotifies(args[2]);
       if (name === 'onGroupSingleScreenNotifies') return groupNotifies(args[2]);
+      if (name === 'onMemberListChange') {
+        // Member list pushes carry uid → uin pairs; caching them lets membership notices and mentions resolve.
+        const infos = args[0]?.infos;
+        if (!(infos instanceof Map)) { native(source, name, args); return; }
+        for (const [uid, info] of infos) remember(uid, info?.uin);
+        return;
+      }
       if (name === 'onMemberInfoChange') {
         for (const [uid, info] of args[2] instanceof Map ? args[2] : []) {
           remember(uid, info.uin);
@@ -339,7 +384,7 @@ function createEventReceiver(session, self, report, current) {
         await batch(args[0]?.buddyReqs, async req => {
           if (req.isInitiator || !req.isUnread || (req.isDecide && req.reqType !== 13)) return;
           emit({ type: 'request', self, time: req.reqTime, key: `friend:${req.friendUid}:${req.reqTime}`, event: {
-            request_type: 'friend', user_id: await uin(req.friendUid), comment: String(req.extWords ?? ''), flag: String(req.reqTime),
+            request_type: 'friend', user_id: await uin(req.friendUid), comment: String(req.extWords ?? ''), flag: `f:${req.friendUid}:${req.reqTime}`,
           } });
         }, 'buddy/requests');
         return;
@@ -366,6 +411,7 @@ function createEventReceiver(session, self, report, current) {
   receive.expandForward = expandForward;
   receive.lookupRecent = lookupRecent;
   receive.record = record;
+  receive.groups = groups;
   return receive;
 }
 

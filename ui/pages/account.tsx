@@ -32,7 +32,7 @@ function Lifecycle({ state }: { state: SessionState }) {
     {steps.map((step, index) => { const value = states[index]; return <li key={step} className="relative flex items-center gap-3 py-2 sm:flex-col sm:items-start sm:gap-2 sm:py-0" aria-current={value === 'active' ? 'step' : undefined}>
       <div className="flex w-full items-center gap-2">
         <span className={cn('grid size-6 shrink-0 place-items-center rounded-full border text-2xs font-semibold',
-          value === 'done' && 'border-success/30 bg-success/10 text-success-text', value === 'active' && 'border-primary/40 bg-accent text-accent-foreground',
+          value === 'done' && 'border-success/30 bg-success/10 text-success-text', value === 'active' && 'border-foreground/40 bg-muted text-foreground',
           value === 'error' && 'border-destructive/30 bg-destructive/10 text-destructive-text', value === 'todo' && 'bg-muted text-muted-foreground')}>
           {value === 'done' ? <Check className="size-3.5" aria-hidden /> : value === 'active' ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden /> : value === 'error' ? <CircleAlert className="size-3.5" aria-hidden /> : index + 1}
         </span>
@@ -95,8 +95,8 @@ export default function Account() {
           </div>
         </div>
         <div className="border-t pt-5"><Lifecycle state={state} /></div>
-        {state.phase === 'hook_installed' && <p className="flex items-start gap-2.5 rounded-lg border border-primary/20 bg-accent/60 px-3.5 py-2.5 text-caption text-secondary-foreground">
-          <LogIn className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />请切换到 QQ 窗口，使用扫码或账号密码正常登录。登录完成后这里会自动更新。
+        {state.phase === 'hook_installed' && <p className="flex items-start gap-2.5 rounded-lg border bg-muted/60 px-3.5 py-2.5 text-caption text-secondary-foreground">
+          <LogIn className="mt-0.5 size-4 shrink-0 text-foreground" aria-hidden />请切换到 QQ 窗口，使用扫码或账号密码正常登录。登录完成后这里会自动更新。
         </p>}
         {state.phase === 'offline' && <p className="flex items-start gap-2.5 rounded-lg border border-destructive/25 bg-destructive/5 px-3.5 py-2.5 text-caption text-secondary-foreground">
           <CircleAlert className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden />账号已掉线。请在 QQ 窗口中重新登录；如需重新挂接，在终端按 Ctrl+C 停止后再次运行 npm start。
@@ -125,7 +125,7 @@ export default function Account() {
         {history.length ? <ol className="grid gap-0 px-4 py-4 sm:px-5">
           {history.map((entry, index) => { const log = describeLog(entry); return <li key={entry.id} className="relative flex gap-3 pb-4 last:pb-0">
             {index < history.length - 1 && <span className="absolute left-[5px] top-4 h-[calc(100%-8px)] w-px bg-border" aria-hidden />}
-            <span className={cn('relative mt-1.5 size-[11px] shrink-0 rounded-full border-2 border-card', log.level === 'error' ? 'bg-destructive' : log.level === 'warn' ? 'bg-warning' : log.level === 'success' ? 'bg-success' : 'bg-primary')} aria-hidden />
+            <span className={cn('relative mt-1.5 size-[11px] shrink-0 rounded-full border-2 border-card', log.level === 'error' ? 'bg-destructive' : log.level === 'warn' ? 'bg-warning' : log.level === 'success' ? 'bg-success' : 'bg-muted-foreground')} aria-hidden />
             <div className="grid min-w-0 gap-0.5">
               <span className="text-sm">{log.message}</span>
               <span className="flex items-center gap-2 text-xs text-muted-foreground"><span className="tabular font-mono">{formatTimeMs(entry.time)}</span><span className={levelMeta[log.level].text}>{levelMeta[log.level].label}</span></span>

@@ -32,11 +32,11 @@ function NavLink({ item, active, compact, badge, onNavigate }: { item: NavItem; 
     className={cn('group relative flex h-8 items-center gap-2.5 rounded-md text-sm outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-ring',
       compact ? 'w-9 justify-center' : 'px-2.5',
       active ? 'bg-card font-medium text-foreground shadow-sm ring-1 ring-border dark:bg-elevated dark:ring-transparent' : 'text-secondary-foreground hover:bg-muted hover:text-foreground')}>
-    <Icon className={cn('size-4 shrink-0 transition-colors', active ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground')} aria-hidden />
+    <Icon className={cn('size-4 shrink-0 transition-colors', active ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground')} aria-hidden />
     {!compact && <span className="truncate">{item.title}</span>}
     {badge ? compact
-      ? <span className="absolute right-1 top-1 size-2 rounded-full bg-primary ring-2 ring-background" aria-label={badge + ' 条未读'} />
-      : <span className="tabular ml-auto min-w-5 rounded-full bg-primary/12 px-1.5 text-center text-2xs font-semibold leading-5 text-accent-foreground dark:bg-accent">{badge > 99 ? '99+' : badge}</span>
+      ? <span className="absolute right-1 top-1 size-2 rounded-full bg-foreground ring-2 ring-background" aria-label={badge + ' 条未读'} />
+      : <span className="tabular ml-auto min-w-5 rounded-full bg-foreground/10 px-1.5 text-center text-2xs font-semibold leading-5 text-foreground">{badge > 99 ? '99+' : badge}</span>
       : null}
   </a>;
   return compact ? <Tooltip content={item.title} side="right">{link}</Tooltip> : link;

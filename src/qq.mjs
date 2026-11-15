@@ -2,6 +2,8 @@ import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 
+// QQ builds this project has been run against on a real client (launch, login, messages).
+export const verifiedVersions = ['9.9.33-52230', '9.9.37-54395'];
 const sentinel = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX');
 const requiredNapiExports = [
   'qq_magic_napi_register',
@@ -114,7 +116,7 @@ export function inspectQQ(root) {
   let fuses = null;
   try { fuses = readFuses(runtimeBytes); } catch { /* Optional in non-standard builds. */ }
   const missingExports = runtimePE.x64 ? requiredNapiExports.filter(name => !runtimePE.exports.has(name)) : requiredNapiExports;
-  const targetMatch = metadata.version === '9.9.33-52230';
+  const targetMatch = verifiedVersions.includes(metadata.version);
   const supported = metadata.eleArch === 'x64' && runtimePE.x64 && wrapperPE.x64 && missingExports.length === 0;
   return {
     root, executable, wrapper, version: metadata.version, arch: metadata.eleArch,

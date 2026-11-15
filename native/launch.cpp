@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
+#include <cstring>
 #include <cwctype>
 #include <iostream>
 #include <map>
@@ -55,6 +57,16 @@ static std::string quote(const std::string& input) {
     return result + '"';
 }
 static void log(const std::string& value) { std::cerr << "[OpenQQ/native] " << value << std::endl; }
+// Process exit codes as text: NTSTATUS crash codes in hex with a short name, ordinary codes in decimal.
+static std::string exitCode(DWORD code) {
+    if (code < 0x80000000) return std::to_string(code);
+    char hex[16];
+    std::snprintf(hex, sizeof(hex), "0x%08lX", static_cast<unsigned long>(code));
+    const char* name = code == 0xC0000005 ? " access violation" : code == 0xC0000409 ? " fail-fast/stack buffer overrun"
+        : code == 0xC0000374 ? " heap corruption" : code == 0xC000001D ? " illegal instruction" : code == 0xC00000FD ? " stack overflow"
+        : code == 0x80000003 ? " breakpoint" : code == 0xC000013A ? " console interrupt" : "";
+    return std::string(hex) + name;
+}
 static std::string line(size_t limit) {
     std::string result;
     char c;
@@ -74,9 +86,40 @@ class Launcher {
     DWORD heldThread = 0, loaderThread = 0;
     CONTEXT saved{};
     DEBUG_EVENT event{};
-    bool pending = false, attached = false, initialBreakpoint = false;
+    bool pending = false, attached = false, initialBreakpoint = false, redirected = false;
     std::wstring wrapper, dll;
     std::string source;
+    // Where the bootstrap was when something went wrong; included in every failure message.
+    const char* stage = "starting QQ";
+
+    [[noreturn]] void exited(DWORD code) {
+        throw std::runtime_error("QQ exited before bootstrap completed (exit code " + exitCode(code) + "; stage: " + stage + ")");
+    }
+    // Once the initializer is redirected no more breakpoints are needed: detach so QQ never continues its
+    // startup under a debugger, then wait for the bootstrap status without debug events.
+    void finish(std::chrono::steady_clock::time_point deadline, const std::atomic<bool>& cancelled) {
+        require(DebugActiveProcessStop(process.dwProcessId), "DebugActiveProcessStop");
+        attached = false;
+        auto checkExit = [this] {
+            if (WaitForSingleObject(process.hProcess, 0) != WAIT_OBJECT_0) return;
+            DWORD code = 0;
+            GetExitCodeProcess(process.hProcess, &code);
+            exited(code);
+        };
+        while (std::chrono::steady_clock::now() < deadline && !cancelled) {
+            checkExit();
+            BootstrapConfig config{};
+            try { config = read<BootstrapConfig>(allocation); }
+            catch (...) { checkExit(); throw; }
+            if (config.status < 0) throw std::runtime_error(std::string(config.error, strnlen(config.error, sizeof(config.error))));
+            if (config.status > 0) {
+                log("{\"stage\":\"bootstrapped\",\"pid\":" + std::to_string(process.dwProcessId) + "}");
+                return;
+            }
+            WaitForSingleObject(process.hProcess, 25);
+        }
+        throw std::runtime_error(std::string(cancelled ? "bootstrap cancelled" : "bootstrap timed out after 30 seconds") + " (stage: " + stage + ")");
+    }
 
     void read(uintptr_t address, void* data, size_t size) {
         SIZE_T got = 0;
@@ -135,6 +178,7 @@ class Launcher {
         saved.EFlags |= 0x10000; // Resume past the execution breakpoint without changing code bytes.
         require(SuspendThread(threads.at(threadId)) != DWORD(-1), "SuspendThread");
         heldThread = threadId;
+        stage = "loading the bootstrap DLL";
         watchAll(0);
         const size_t dllBytes = (dll.size() + 1) * sizeof(wchar_t);
         const size_t bytes = sizeof(BootstrapConfig) + source.size() + 1 + dllBytes;
@@ -180,7 +224,7 @@ class Launcher {
         auto found = modules.find(owner);
         bool target = found != modules.end() && found->second == wrapper;
         log("{\"stage\":\"addon_register\",\"name\":" + quote(name ? string(name) : "") + ",\"target\":" + (target ? "true}" : "false}"));
-        if (target) { callback = init; watchAll(callback); }
+        if (target) { callback = init; watchAll(callback); stage = "waiting for the wrapper initializer"; }
         context.Dr0 = watch;
         context.Dr6 = 0;
         context.EFlags |= 0x10000;
@@ -245,21 +289,13 @@ public:
         for (auto handle : inherited) CloseHandle(handle);
         CloseHandle(process.hThread);
         attached = true;
+        stage = "waiting for QQNT.dll";
         require(DebugSetProcessKillOnExit(FALSE), "DebugSetProcessKillOnExit");
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         while (std::chrono::steady_clock::now() < deadline && !cancelled) {
+            if (redirected) { finish(deadline, cancelled); return; }
             if (!WaitForDebugEvent(&event, 50)) {
                 require(GetLastError() == ERROR_SEM_TIMEOUT, "WaitForDebugEvent");
-                if (allocation && !heldThread) {
-                    auto config = read<BootstrapConfig>(allocation);
-                    if (config.status < 0) throw std::runtime_error(config.error);
-                    if (config.status > 0) {
-                        require(DebugActiveProcessStop(process.dwProcessId), "DebugActiveProcessStop");
-                        attached = false;
-                        log("{\"stage\":\"bootstrapped\",\"pid\":" + std::to_string(process.dwProcessId) + "}");
-                        return;
-                    }
-                }
                 continue;
             }
             pending = true;
@@ -282,6 +318,8 @@ public:
                     require(SetThreadContext(threads.at(heldThread), &saved), "redirect initializer");
                     require(ResumeThread(threads.at(heldThread)) != DWORD(-1), "ResumeThread");
                     heldThread = 0;
+                    redirected = true;
+                    stage = "running the bootstrap script";
                 }
                 CloseHandle(threads.at(event.dwThreadId));
                 threads.erase(event.dwThreadId);
@@ -298,6 +336,7 @@ public:
                 if (!runtime && filename(path) == L"qqnt.dll") {
                     runtime = base;
                     watchAll(exported(base, "qq_magic_napi_register"));
+                    stage = "waiting for wrapper.node registration";
                     log("{\"stage\":\"runtime_found\",\"name\":\"QQNT.dll\",\"pid\":" + std::to_string(process.dwProcessId) + "}");
                 }
                 break;
@@ -308,12 +347,12 @@ public:
             case EXCEPTION_DEBUG_EVENT: exception(disposition); break;
             case EXIT_PROCESS_DEBUG_EVENT:
                 attached = false;
-                throw std::runtime_error("QQ exited before bootstrap completed (exit code " + std::to_string(event.u.ExitProcess.dwExitCode) + ")");
+                exited(event.u.ExitProcess.dwExitCode);
             }
             require(ContinueDebugEvent(event.dwProcessId, event.dwThreadId, disposition), "ContinueDebugEvent");
             pending = false;
         }
-        throw std::runtime_error(cancelled ? "bootstrap cancelled" : "bootstrap timed out after 30 seconds");
+        throw std::runtime_error(std::string(cancelled ? "bootstrap cancelled" : "bootstrap timed out after 30 seconds") + " (stage: " + stage + ")");
     }
 };
 

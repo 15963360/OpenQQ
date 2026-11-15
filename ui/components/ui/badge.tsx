@@ -6,7 +6,7 @@ export const badgeVariants = cva('inline-flex h-5 shrink-0 items-center gap-1 wh
   variants: {
     tone: {
       neutral: 'border-border bg-muted text-secondary-foreground',
-      primary: 'border-primary/20 bg-accent text-accent-foreground',
+      primary: 'border-foreground/15 bg-foreground/[0.06] text-foreground',
       success: 'border-success/25 bg-success/10 text-success-text',
       warning: 'border-warning/25 bg-warning/10 text-warning-text',
       destructive: 'border-destructive/25 bg-destructive/10 text-destructive-text',

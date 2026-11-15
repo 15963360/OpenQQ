@@ -35,7 +35,7 @@ function ActionList({ selected, onSelect }: { selected: string; onSelect(spec: A
   const groups = useMemo(() => {
     const text = query.trim().toLowerCase();
     const matches = catalog.filter(spec => !text || spec.action.includes(text) || spec.summary.includes(text));
-    return ['消息', '账号', '扩展'].map(group => ({ group, items: matches.filter(spec => spec.group === group) })).filter(group => group.items.length);
+    return ['消息', '群管理', '账号', '扩展'].map(group => ({ group, items: matches.filter(spec => spec.group === group) })).filter(group => group.items.length);
   }, [query]);
   return <Card className="flex flex-col lg:sticky lg:top-20 lg:max-h-[calc(100dvh-6rem)]">
     <div className="border-b p-3"><SearchInput value={query} onValueChange={setQuery} placeholder="搜索动作" /></div>
@@ -91,7 +91,7 @@ export default function ApiExplorer() {
     const started = performance.now();
     const run: Run = { id: ++runId, time: new Date().toISOString(), body, action: parsed.value.action, elapsed: 0 };
     try { run.response = await apiRequest<ActionResponse>('/api/action', parsed.value); }
-    catch (error) { run.error = (error as Error).message + (spec.sends ? '；如已提交发送，请先在 QQ 中确认结果' : ''); }
+    catch (error) { run.error = (error as Error).message + (spec.sends ? '；如已提交发送，请先在 QQ 中确认结果' : spec.changes ? '；操作可能已生效，请先在 QQ 中确认结果' : ''); }
     run.elapsed = performance.now() - started;
     setCurrent(run); addRun(run); setBusy(false);
   }
@@ -127,6 +127,7 @@ export default function ApiExplorer() {
                   <h2 className="font-mono text-base font-semibold">{spec.action}</h2>
                   <Badge tone="outline">{spec.group}</Badge>
                   {spec.sends && <Badge tone="warning"><TriangleAlert />会真实发送</Badge>}
+                  {spec.changes && <Badge tone="warning"><TriangleAlert />会真实操作</Badge>}
                 </div>
                 <p className="text-sm text-secondary-foreground">{spec.summary} · <span className="text-muted-foreground">{spec.description}</span></p>
               </div>
@@ -136,7 +137,7 @@ export default function ApiExplorer() {
                 <thead className="bg-muted/50 text-xs text-muted-foreground"><tr><th className="px-3 py-2 font-medium">参数</th><th className="px-3 py-2 font-medium">类型</th><th className="px-3 py-2 font-medium">说明</th></tr></thead>
                 <tbody className="divide-y">{spec.params.map(item => <tr key={item.name}>
                   <td className="whitespace-nowrap px-3 py-2 font-mono font-medium">{item.name}{item.required && <span className="ml-1.5 font-sans text-2xs font-medium text-destructive-text">必填</span>}</td>
-                  <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-accent-foreground">{item.type}</td>
+                  <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-secondary-foreground">{item.type}</td>
                   <td className="px-3 py-2 text-secondary-foreground">{item.description}</td>
                 </tr>)}</tbody>
               </table>

@@ -25,7 +25,7 @@ export default function Login() {
     <main className="flex flex-1 items-center justify-center px-4 pb-20">
       <div className="w-full max-w-sm">
         <div className="mb-6 grid gap-2 text-center">
-          <span className="mx-auto grid size-11 place-items-center rounded-xl border bg-card shadow-sm"><KeyRound className="size-5 text-primary" aria-hidden /></span>
+          <span className="mx-auto grid size-11 place-items-center rounded-xl border bg-card shadow-sm"><KeyRound className="size-5 text-foreground" aria-hidden /></span>
           <h1 className="mt-2 text-xl font-semibold tracking-[-0.02em]">输入访问密钥</h1>
           <p className="text-sm text-muted-foreground">打开终端显示的完整 WebUI 地址，或粘贴本次启动的访问密钥。</p>
         </div>

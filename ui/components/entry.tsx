@@ -24,7 +24,7 @@ export const kindMeta: Record<EntryKind, { label: string; icon: LucideIcon; tone
 export const levelMeta: Record<LogLevel, { label: string; tone: Tone; text: string }> = {
   error: { label: '错误', tone: 'destructive', text: 'text-destructive-text' },
   warn: { label: '警告', tone: 'warning', text: 'text-warning-text' },
-  info: { label: '信息', tone: 'primary', text: 'text-accent-foreground' },
+  info: { label: '信息', tone: 'primary', text: 'text-foreground' },
   success: { label: '完成', tone: 'success', text: 'text-success-text' },
   debug: { label: '调试', tone: 'neutral', text: 'text-muted-foreground' },
 };

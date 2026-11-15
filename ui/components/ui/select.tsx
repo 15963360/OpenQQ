@@ -31,7 +31,7 @@ export function Select({ value, onValueChange, options, id, placeholder, classNa
             className="relative flex min-h-8 cursor-default select-none items-center rounded-md py-1.5 pl-2 pr-8 text-sm outline-none data-[disabled]:pointer-events-none data-[highlighted]:bg-muted data-[disabled]:opacity-50">
             <div className="grid min-w-0"><SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
               {option.description && <span className="text-xs text-muted-foreground">{option.description}</span>}</div>
-            <SelectPrimitive.ItemIndicator className="absolute right-2 inline-flex"><Check className="size-4 text-primary" /></SelectPrimitive.ItemIndicator>
+            <SelectPrimitive.ItemIndicator className="absolute right-2 inline-flex"><Check className="size-4 text-foreground" /></SelectPrimitive.ItemIndicator>
           </SelectPrimitive.Item>)}
         </SelectPrimitive.Viewport>
       </SelectPrimitive.Content>

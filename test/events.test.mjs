@@ -72,6 +72,42 @@ test('system pushes fall back to group UID lookup and keep the notice when only 
   assert.equal(raw[0].event.operator_id, 0);
 });
 
+test('membership notices retry members via member list pushes and degrade instead of being dropped', async () => {
+  const raw = [];
+  const events = [];
+  const convert = createEventConverter();
+  const receive = nativeEvents.createEventReceiver({
+    getUixConvertService: () => ({ getUin: async () => ({ uinInfo: new Map() }) }),
+    getProfileService: () => ({ getUinByUid: async () => new Map() }),
+    getGroupService: () => ({ getUinByUids: async () => ({ uins: new Map() }) }),
+  }, self, event => { raw.push(event); const result = convert(event); if (result) events.push(result); }, () => true, { memberRetryMs: 20 });
+
+  // Every lookup misses at first; the member list QQ pushes meanwhile lets the delayed retry resolve the kick.
+  const pending = receive('msg', 'onRecvSysMsg', [change(34, 131, 'u_other')]);
+  await receive('group', 'onMemberListChange', [{ sceneId: 'scene', ids: ['u_actor'], infos: new Map([['u_actor', { uid: 'u_actor', uin: '654321' }]]), finish: true }]);
+  await pending;
+  assert.deepEqual([events[0].notice_type, events[0].sub_type, events[0].user_id, events[0].openqq_user_unknown], ['group_decrease', 'kick', 654321, undefined]);
+  assert.equal(raw.filter(event => event.type === 'event_error' && /u_actor/.test(event.error)).length, 0);
+
+  // Still unknown after the retry: the leave is reported with user_id 0, flagged, plus one diagnostic.
+  await receive('msg', 'onRecvSysMsg', [packet(34, Buffer.concat([uint(1, 987654), bytes(3, 'u_stranger'), uint(4, 130), bytes(5, '0')]))]);
+  const leave = events.at(-1);
+  assert.deepEqual([leave.sub_type, leave.user_id, leave.operator_id, leave.openqq_user_unknown, leave.openqq_operator_unknown], ['leave', 0, 0, true, true]);
+  assert.equal(raw.filter(event => event.type === 'event_error' && /u_stranger.*已按未知处理/.test(event.error)).length, 1);
+
+  // Unexpected member list shapes are reported once like other unadapted callbacks.
+  await receive('group', 'onMemberListChange', [{ infos: [] }]);
+  assert.ok(raw.some(event => event.type === 'native_callback' && event.event === 'onMemberListChange'));
+});
+
+test('the converter only accepts user_id 0 on membership notices explicitly flagged as unknown', () => {
+  const convert = createEventConverter();
+  const raw = (event, key) => ({ type: 'notice', self, key, event: { group_id: '987654', operator_id: 0, ...event } });
+  assert.equal(convert(raw({ notice_type: 'group_increase', sub_type: 'approve', user_id: 0, openqq_user_unknown: true }, 'a')).user_id, 0);
+  assert.throws(() => convert(raw({ notice_type: 'group_increase', sub_type: 'approve', user_id: 0 }, 'b')), /user_id/);
+  assert.throws(() => convert(raw({ notice_type: 'friend_add', user_id: 0, openqq_user_unknown: true }, 'c')), /user_id/);
+});
+
 test('unresolvable optional identities degrade instead of dropping messages, recalls and bans', async () => {
   const raw = [];
   let lookups = 0;
@@ -188,7 +224,8 @@ test('friend and group requests filter handled/outgoing entries and retain flags
   const req = { friendUid: 'u_actor', reqTime: '1794470400', reqType: 1, extWords: 'hi', isUnread: true, isDecide: false };
   await f.receive('buddy', 'onBuddyReqChange', [{ buddyReqs: [req, { ...req, isInitiator: true }, { ...req, isDecide: true }, { ...req, isUnread: false }] }]);
   assert.equal(f.events.length, 1);
-  assert.equal(f.events[0].flag, '1794470400');
+  // The flag carries what set_friend_add_request needs: the requester's UID and the request time.
+  assert.equal(f.events[0].flag, 'f:u_actor:1794470400');
   assert.equal(f.events[0].request_type, 'friend');
   for (const type of [1, 5, 7]) {
     const notify = { type, status: 1, seq: String(1794470400000000n + BigInt(type)), group: { groupCode: '987654' },
@@ -202,7 +239,8 @@ test('friend and group requests filter handled/outgoing entries and retain flags
   await f.receive('group', 'onGroupNotifiesUpdatedV2', [false, 'cursor', [v2], []]);
   await f.receive('group', 'onGroupNotifiesUpdated', [false, [v2]]);
   assert.equal(f.events.filter(event => event.post_type === 'request').length, 5);
-  assert.equal(f.events.at(-1).flag, v2.seq);
+  // group code, notification type and sequence: everything set_group_add_request needs.
+  assert.equal(f.events.at(-1).flag, `g:987654:7:${v2.seq}`);
 });
 
 test('friend/member snapshots establish a baseline and emit real changes without startup floods', async () => {

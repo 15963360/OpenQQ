@@ -63,7 +63,7 @@ export async function createNativeChannel(path = `\\\\.\\pipe\\openqq-${randomBy
   });
   return {
     events, path, token,
-    request(request) {
+    request(request, timeoutMs = 20000) {
       return new Promise((resolve, reject) => {
         if (!authenticated?.writable || authenticated.destroyed) { reject(Object.assign(new Error('QQ 原生 IPC 尚未连接'), { retcode: 1502 })); return; }
         if (pending.size >= 32 || authenticated.writableLength > 1024 * 1024) { reject(Object.assign(new Error('动作队列已满，未提交'), { retcode: 1503 })); return; }
@@ -73,7 +73,7 @@ export async function createNativeChannel(path = `\\\\.\\pipe\\openqq-${randomBy
         const timer = setTimeout(() => {
           pending.delete(id);
           reject(Object.assign(new Error('IPC 动作超时；已提交的发送结果未确认，请勿自动重试'), { retcode: 1501 }));
-        }, 20000);
+        }, timeoutMs);
         pending.set(id, { resolve, reject, timer });
         authenticated.write(frame);
       });

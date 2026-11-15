@@ -26,7 +26,7 @@ export function createEventConverter() {
       if (ref) refs.set(nextId, ref);
       nextId++;
     }
-    // shortcut: correlation and deduplication retain 10000 entries in memory, persist before adding history APIs.
+    // Id mappings and dedup keys live in memory (10000 entries); they would need persisting before any history API.
     if (ids.size > 10000) {
       const [, oldest] = ids.entries().next().value;
       ids.delete(ids.keys().next().value);
@@ -99,7 +99,9 @@ export function createEventConverter() {
       const type = event.notice_type ?? event.request_type;
       if (!type) throw new Error('事件缺少类型');
       if (['group_admin', 'group_increase', 'group_decrease', 'group_ban', 'group_recall', 'group_upload', 'group_card', 'group_name', 'group'].includes(type)) event.group_id = id(event.group_id, 'group_id');
-      if (!['openqq_native', 'openqq_gray_tip', 'bot_offline'].includes(type)) event.user_id = integer(event.user_id, 'user_id', type === 'group_ban' ? 0 : 1);
+      // 0 is valid for whole-group bans and for membership notices whose member could not be resolved (flagged).
+      const unknownMember = event.openqq_user_unknown === true && ['group_increase', 'group_decrease', 'group_admin'].includes(type);
+      if (!['openqq_native', 'openqq_gray_tip', 'bot_offline'].includes(type)) event.user_id = integer(event.user_id, 'user_id', type === 'group_ban' || unknownMember ? 0 : 1);
       if ('target_id' in event) event.target_id = id(event.target_id, 'target_id');
       if ('operator_id' in event) event.operator_id = integer(event.operator_id, 'operator_id');
       if (['group_increase', 'group_decrease', 'group_ban', 'group_recall'].includes(type) && !('operator_id' in event)) throw new Error('通知缺少 operator_id');

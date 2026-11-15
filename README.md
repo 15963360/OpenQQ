@@ -1,124 +1,126 @@
-# OpenQQ
+<p align="center"><img src="web/logo.svg" alt="OpenQQ" width="96" height="96"></p>
 
-[![CI](https://github.com/feijx3/OpenQQ/actions/workflows/ci.yml/badge.svg)](https://github.com/feijx3/OpenQQ/actions/workflows/ci.yml)
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+<h1 align="center">OpenQQ</h1>
+
+<p align="center">
+  <a href="https://github.com/feijx3/OpenQQ/actions/workflows/ci.yml"><img src="https://github.com/feijx3/OpenQQ/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a>
+</p>
 
 > [!WARNING]
-> 本项目为非官方实现，与腾讯公司无任何关联。挂接 QQ 客户端可能违反《QQ 软件许可及服务协议》，并可能导致账号被限制或封禁。请仅在自己的账号与设备上用于学习研究，风险自负。
+> 非官方项目，与腾讯无关。挂接 QQ 客户端可能违反《QQ 软件许可及服务协议》，账号有被限制或封禁的风险。请只在自己的账号和设备上用于学习研究，风险自负。
 
-面向 Windows x64 QQ NT 的独立 OneBot v11 原生桥接实现。通过 C++ 启动器和自有 DLL 在 N-API 注册边界（`qq_magic_napi_register`）挂接会话，使用 Windows 调试 API，不开启 Electron `--inspect` 端口。原生组件使用系统 UCRT，不需要额外安装运行库；OneBot、WebUI 和会话业务继续由 Node.js / JavaScript 执行。
+Windows x64 QQ NT 的 OneBot v11 桥接。一个 C++ 启动器加一个自带的 DLL，在 QQ 注册原生模块的地方（`qq_magic_napi_register`）挂上会话；用的是 Windows 调试 API，不开 Electron 的 `--inspect` 端口。原生部分只依赖系统自带的 UCRT，不用另装运行库。OneBot、WebUI 和会话逻辑是 Node.js / JavaScript。
 
-## 功能概览
+## 功能
 
-- **OneBot v11 接入**：支持正向 WebSocket 服务端（Bearer Header 或 `access_token` 查询参数鉴权，带失败限流）和反向 WebSocket 客户端（断线指数退避重连，支持多目标与自定义心跳）。
-- **环境自动探测**：自动扫描 Windows 注册表与常见路径定位 QQ NT 客户端目录，并检查已编译的 C++ 原生引导器。
-- **PE64 原生兼容性检查**：启动前静态解析 `QQNT.dll` 与 `wrapper.node` 的 x64 PE 导出表与架构，验证所需 N-API 符号与 `qq_magic_napi_register` 存在。
-- **WebUI 配置向导与控制台**：本地回环 WebUI（仅监听 `127.0.0.1`，随机生成临时访问密钥）提供图形化配置向导（`/setup`）与控制台：概览（会话、吞吐、连接健康）、按会话收发消息、事件流、OneBot 动作调试、运行日志，以及账号、连接和设置管理。
-- **终端交互与 JSONL 输出**：交互式终端支持命令补全、历史记录与 `/verbose`、`/clear`、`/quit`；在管道或 `--json` 模式下输出标准 OneBot JSON Lines。
+- OneBot v11：正向 WebSocket 服务端（Bearer Header 或 `access_token` 查询参数鉴权，鉴权失败有限流），反向 WebSocket 客户端（最多 8 个目标，QQ 会话就绪时断线后每 3 秒重连一次）。心跳固定每 15 秒一次，目前不能配置。
+- 启动前检查：扫描注册表和常见路径找到 QQ NT，再解析 `QQNT.dll`、`wrapper.node` 的 x64 PE 导出表，确认 `qq_magic_napi_register` 等 N-API 符号都在。
+- 发送与管理：文本、CQ 码、@、表情、图片、语音、视频、文件、骰子、猜拳、引用回复；撤回、踢人、禁言、全员禁言、管理员、群名片、群名、退群、处理入群/好友申请、点赞，以及群和成员查询。详见 [docs/actions.md](docs/actions.md)。
+- WebUI：只监听 `127.0.0.1`，每次启动生成临时访问密钥。有配置向导（`/setup`）和控制台：概览（会话、吞吐、连接状态）、按会话收发消息、事件流、OneBot 动作调试、运行日志，以及账号、连接和设置管理。
+- 终端：交互模式支持命令补全、历史记录和 `/verbose`、`/clear`、`/quit`；接管道或加 `--json` 时输出 OneBot 的 JSON Lines。
+
+## 界面预览
+
+以下截图为模拟数据，非真实账号。
+
+| 概览 | 消息 |
+| --- | --- |
+| ![概览](docs/images/overview.png) | ![消息](docs/images/messages.png) |
+| **事件流** | **连接管理** |
+| ![事件](docs/images/events.png) | ![连接](docs/images/connections.png) |
 
 ## 环境要求
 
-- **操作系统**：Windows 10 / 11 x64
-- **QQ 客户端**：Windows x64 QQ NT 9.x（已实机验证 `9.9.33-52230`，其他包含完整 N-API 导出的 9.x 构建可运行但会提示未经过完整实机验证）
-- **Node.js**：`>= 22`
-- **源码构建**：本机已有的 CMake、C++17 x64 编译器（LLVM-MinGW / MinGW 或 Visual Studio）；使用 MinGW 时还需 Ninja。发布包已包含原生组件，无需编译器。
-
-当前 C++ 引导器已通过本地模拟宿主测试，并在 QQ `9.9.33-52230` 上验证启动、登录和同步完成；真实消息发送尚未验证。
+- Windows 10 / 11 x64
+- Windows x64 QQ NT 9.x。测试过 `9.9.33-52230` 和 `9.9.37-54395`；其他带完整 N-API 导出的 9.x 也能启动，但会提示该版本没有测试过。
+- Node.js >= 22
+- 从源码构建需要本机已有 CMake 和 C++17 x64 编译器（LLVM-MinGW / MinGW 或 Visual Studio），用 MinGW 时还要 Ninja。发布包里已有编译好的原生组件，不需要编译器。
 
 ## 快速开始
 
-### 1. 安装依赖
+克隆并构建：
 
 ```powershell
 git clone https://github.com/feijx3/OpenQQ.git
 cd OpenQQ
 npm install
-
 npm run build
 ```
 
-### 2. 检查本机环境
+检查本机环境。这条命令只读，输出 JSON：QQ 目录和版本、原生导出是否齐全、启动器状态、QQ 是否正在运行。
 
 ```powershell
 npm run doctor
 ```
 
-该命令以只读 JSON 格式输出当前探测到的 QQ NT 目录、版本、原生导出兼容状态、原生引导器状态，以及 QQ 进程是否在运行。也可通过环境变量覆盖默认搜索路径：
+找不到 QQ 时，用环境变量指定目录：
 
 ```powershell
 $env:OPENQQ_QQ_ROOT = "D:\Programs\QQNT"
 npm run doctor
 ```
 
-### 3. 初始化配置并启动
-
-如果工作区尚未生成 `config/openqq.json`（也可从 `config/openqq.example.json` 复制修改）：
-
-- **浏览器图形向导**（首次运行 `npm start` 会自动进入，或随时执行 `npm run webui`）：
+启动前先完全退出 QQ，然后：
 
 ```powershell
 npm start
 ```
 
-终端会输出一次性的本机访问地址（`http://127.0.0.1:17860/setup#token=...`），在向导中确认 QQ 目录、OneBot 正/反向 WebSocket 配置及密钥即可保存并拉起 QQ。
+没有 `config/openqq.json` 时会进入浏览器里的配置向导（也可以随时用 `npm run webui` 打开）。终端会打印一个一次性的本机地址，形如 `http://127.0.0.1:17860/setup#token=...`。在向导里确认 QQ 目录、正向/反向 WebSocket 和密钥，保存后 OpenQQ 会拉起 QQ。
 
-- **命令行交互初始化**：
-
-```powershell
-npm run init
-```
-
-- **命令行参数覆盖启动**：
+不想用向导的话：
 
 ```powershell
-npm start -- --qq-root "C:\Program Files\Tencent\QQNT"
+npm run init                                              # 在终端里交互生成配置
+npm start -- --qq-root "C:\Program Files\Tencent\QQNT"    # 临时指定 QQ 目录
 ```
 
-启动前请先**完全退出正在运行的 QQ 进程**，再由 OpenQQ 拉起 QQ 并在 QQ 窗口中正常登录。当终端与控制台显示「QQ 会话就绪」后，即可接入机器人框架。
+也可以把 `config/openqq.example.json` 复制成 `config/openqq.json` 再改。
+
+在 QQ 窗口里正常登录，终端和控制台出现「QQ 会话就绪」后，机器人框架就能连上来了。
 
 ## 常用命令
 
 | 命令 | 说明 |
 | --- | --- |
-| `npm run doctor` | 检查本机 QQ NT、C++ 原生引导器与路径兼容性 |
-| `npm run init` | 在终端交互生成 `config/openqq.json` |
-| `npm run webui` | 仅启动 Web 配置向导与预览模式 |
-| `npm start` | 启动 OpenQQ、WebUI、OneBot WS 并挂接 QQ |
-| `npm run bot` | 运行内置 OneBot 机器人示例（需配置 `ONEBOT_TOKEN`） |
-| `npm run build` | 编译 C++ 原生组件并打包 WebUI（`start`、`webui`、`test` 会自动执行） |
-| `npm run build:native` | 使用本机工具链编译原生启动器、DLL 和模拟宿主 |
-| `npm run test:native` | 编译并验证原生挂接链路 |
-| `npm test` | 运行 Node.js 单元测试与集成测试 |
+| `npm run doctor` | 检查 QQ NT、原生启动器和路径兼容性 |
+| `npm run init` | 在终端里交互生成 `config/openqq.json` |
+| `npm run webui` | 只启动配置向导（预览模式） |
+| `npm start` | 启动 OpenQQ、WebUI 和 OneBot WebSocket，并挂接 QQ |
+| `npm run bot` | 运行示例机器人（需要 `ONEBOT_TOKEN`） |
+| `npm run build` | 编译原生组件并打包 WebUI（`start`、`webui`、`test` 会自动执行） |
+| `npm run build:native` | 用本机工具链编译启动器、DLL 和模拟宿主 |
+| `npm run test:native` | 编译并测试原生挂接链路 |
+| `npm test` | 运行 Node.js 单元测试和集成测试 |
 
 ## 目录结构
 
 | 路径 | 内容 |
 | --- | --- |
-| `src/` | Node 主进程：配置、环境探测、OneBot 网络层、终端与 WebUI 服务 |
-| `native/` | C++ 启动器与自有 DLL，以及 QQ 内的 JavaScript 会话、事件与动作处理 |
+| `src/` | Node 主进程：配置、环境探测、OneBot 网络层、终端和 WebUI 服务 |
+| `native/` | C++ 启动器和 DLL，以及在 QQ 里运行的 JavaScript（会话、事件、动作） |
 | `ui/` | WebUI 源码（React + TypeScript、Tailwind CSS、Radix UI），构建产物输出到 `web/` |
-| `web/` | WebUI 静态入口页面与构建产物 |
-| `config/` | 配置示例；本地 `openqq.json` 不纳入版本控制 |
-| `docs/` | 接入、动作、事件与原生挂接文档 |
+| `web/` | WebUI 静态入口页和构建产物 |
+| `config/` | 配置示例；本地的 `openqq.json` 不进版本控制 |
+| `docs/` | 接入、动作、事件和原生挂接的文档 |
 | `examples/` | OneBot 机器人示例 |
-| `test/` | Node 测试与原生模拟宿主 |
+| `test/` | Node 测试和原生模拟宿主 |
 
-## 安全设计说明
+## 安全相关
 
-- **管理界面隔离**：WebUI 仅绑定 `127.0.0.1`，通过 `timingSafeEqual` 校验随机生成的会话 Bearer Token，页面加载后立即通过 `history.replaceState` 清除 URL Fragment 中的密钥，仅存放在当前标签页的 `sessionStorage`。
-- **IPC 凭据不进命令行**：`native/bin/openqq-launch.exe` 从标准输入接收路径和会话脚本（含命名管道与一次性令牌），避免进程命令行参数泄露敏感凭据。
-- **可执行文件与路径约束**：配置文件拒绝 UNC 路径和控制字符；原生启动器固定从项目内加载，通过文件句柄校验并规范化客户端、wrapper 与 DLL 路径。
-- **鉴权防爆破**：OneBot WebSocket 服务端与本地配置校验限制单 IP 连续鉴权失败次数（60 秒超过 20 次触发 429 限制），禁止协议相对 URL 转发与不安全跳转。
+- WebUI 只绑定 `127.0.0.1`。访问密钥用 `timingSafeEqual` 比较；页面加载后立刻用 `history.replaceState` 清掉 URL 片段里的密钥，之后只放在当前标签页的 `sessionStorage`。
+- 路径和会话脚本通过标准输入交给 `native/bin/openqq-launch.exe`，包括命名管道名和一次性令牌，所以它们不会出现在进程命令行里。
+- 配置文件拒绝 UNC 路径和控制字符。启动器只从项目目录加载，并通过文件句柄确认 QQ、wrapper 和 DLL 的真实路径。
+- OneBot 正向 WebSocket 服务端会限制单个 IP 的连续鉴权失败：60 秒内超过 20 次返回 429。WebUI 的访问密钥是每次启动随机生成的 256 位值，没有单独的失败限流，只限制同时执行的动作数。以 `//` 开头的请求地址会被两个服务拒绝，反向连接不跟随重定向。
 
-## 测试与原生验证
-
-运行完整测试套件（包括编译原生组件）：
+## 测试
 
 ```powershell
 npm test
 ```
 
-`npm test` 包含本地模拟宿主验证，覆盖原生启动器与 DLL 的挂接链路，不启动已安装的 QQ。也可单独运行：
+`npm test` 会先编译原生组件，其中包含用模拟宿主跑的挂接测试，不会启动本机安装的 QQ。只跑原生部分：
 
 ```powershell
 npm run test:native
@@ -133,13 +135,13 @@ npm run test:native
 
 ## 参与贡献
 
-欢迎提交 Issue 与 Pull Request，提交前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
+欢迎提 Issue 和 Pull Request，提交前请看 [CONTRIBUTING.md](CONTRIBUTING.md)。安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。
 
 ## 许可证
 
-本项目以 [GNU Affero General Public License v3.0 或更高版本](LICENSE) 发布。基于本项目修改并通过网络提供服务时，须向用户提供对应源代码。
+[GNU Affero General Public License v3.0 或更高版本](LICENSE)。基于本项目修改并通过网络提供服务时，须向用户提供对应源代码。
 
-## 协议与技术参考
+## 参考
 
 - [OneBot v11 协议规范](https://github.com/botuniverse/onebot-11)
 - [Node-API (N-API) 头文件声明](https://github.com/nodejs/node/blob/v22.16.0/src/node_api.h)

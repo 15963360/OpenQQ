@@ -72,6 +72,8 @@ API __declspec(noinline) void qq_magic_napi_register(napi_module* module) { glob
 __declspec(noinline) static void* initialize(void*, void* exports) {
     global_object++;
     if (mode("original-error")) exception_pending = true;
+    // Simulates QQ dying inside its own initializer after the launcher has detached.
+    if (mode("exit")) ExitProcess(0xC0000409);
     Sleep(1);
     return exports;
 }

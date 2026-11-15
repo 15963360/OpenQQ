@@ -88,7 +88,7 @@
     font-feature-settings: "cv11", "ss03";
     text-rendering: optimizeLegibility;
   }
-  ::selection { background: color-mix(in oklab, var(--primary) 24%, transparent); }
+  ::selection { background: color-mix(in oklab, var(--foreground) 16%, transparent); }
   :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
   input:focus-visible, textarea:focus-visible, [role="combobox"]:focus-visible { outline: none; }
   code, kbd, pre, samp { font-family: var(--font-mono); }
@@ -106,7 +106,6 @@
 }
 
 /* JSON viewer token colors (both themes read from tokens). */
-.json-key { color: var(--accent-foreground); }
-.json-string { color: color-mix(in oklab, var(--success) 78%, var(--foreground)); }
-.json-number { color: color-mix(in oklab, var(--warning) 80%, var(--foreground)); }
-.json-literal { color: var(--primary); }
+.json-key { color: var(--muted-foreground); }
+.json-string { color: var(--foreground); }
+.json-number, .json-literal { color: var(--foreground); font-weight: 600; }

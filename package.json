@@ -53,7 +53,6 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "esbuild": "^0.28.2",
-    "javascript-obfuscator": "^5.10.1",
     "lucide-react": "^1.72.0",
     "radix-ui": "^1.8.1",
     "react": "^19.3.1",
@@ -62,5 +61,8 @@
     "tailwindcss": "^4.3.5",
     "typescript": "^7.0.2",
     "zustand": "^5.1.0"
+  },
+  "optionalDependencies": {
+    "silk-wasm": "^3.7.1"
   }
 }

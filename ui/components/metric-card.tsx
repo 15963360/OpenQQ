@@ -32,6 +32,6 @@ export function MetricCard({ label, value, icon: Icon, hint, tone = 'default', l
 export function Meter({ value, label }: { value: number; label: string }) {
   const clamped = Math.max(0, Math.min(100, value));
   return <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(clamped)}>
-    <div className="h-full rounded-full bg-primary transition-[width] duration-500" style={{ width: Math.max(clamped, clamped > 0 ? 2 : 0) + '%' }} />
+    <div className="h-full rounded-full bg-foreground transition-[width] duration-500" style={{ width: Math.max(clamped, clamped > 0 ? 2 : 0) + '%' }} />
   </div>;
 }

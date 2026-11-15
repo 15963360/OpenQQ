@@ -12,6 +12,7 @@ const files = new Map([
   ['/theme.css', ['theme.css', 'text/css; charset=utf-8']],
   ['/fonts/inter.woff2', ['fonts/inter.woff2', 'font/woff2']],
   ['/fonts/mono.woff2', ['fonts/mono.woff2', 'font/woff2']],
+  ['/logo.svg', ['logo.svg', 'image/svg+xml']],
   ['/setup', ['setup.html', 'text/html; charset=utf-8']],
 ]);
 const limit = 2 * 1024 * 1024;

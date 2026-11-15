@@ -42,5 +42,6 @@ test('WebUI config/save/start require authentication and use the same validated 
   assert.equal((await fetch(web.origin + '/api/config', { method: 'POST', headers, body: JSON.stringify(config) })).status, 200);
   assert.equal(readConfig(path).ws.port, 3101);
   await fetch(web.origin + '/api/start', { method: 'POST', headers, body: '{}' }); assert.equal(started, 1);
-  for (const asset of ['/setup', '/app.js', '/styles.css']) assert.equal((await fetch(web.origin + asset)).status, 200);
+  for (const asset of ['/setup', '/app.js', '/styles.css', '/logo.svg']) assert.equal((await fetch(web.origin + asset)).status, 200);
+  assert.equal((await fetch(web.origin + '/logo.svg')).headers.get('content-type'), 'image/svg+xml');
 });

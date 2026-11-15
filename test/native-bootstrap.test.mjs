@@ -32,6 +32,7 @@ const scenarios = [
   ['script-error', 1, 'script exception cleared'],
   ['bad-dll', 1, 'original return'],
   ['cancel', 1, 'original return'],
+  ['exit', 1, null],
 ];
 for (const [mode, expectedCode, expectedReturn] of scenarios) {
   test('C++ native bootstrap: ' + mode, { skip: process.platform !== 'win32', timeout: 45000 }, async t => {
@@ -70,6 +71,11 @@ for (const [mode, expectedCode, expectedReturn] of scenarios) {
       assert.match(readFileSync(output, 'utf8'), /\.startNative\(/);
       assert.match(readFileSync(output, 'utf8'), /fixture-only/);
     } else assert.ok(stages.some(e => e.stage === 'error'), diagnostics);
+    if (mode === 'exit') {
+      // A crash after detaching still reports the exit code and where the bootstrap was.
+      assert.match(stages.find(e => e.stage === 'error').error, /exit code 0xC0000409 fail-fast.*stage: running the bootstrap script/, diagnostics);
+      return;
+    }
     for (let attempt = 0; attempt < 40 && !existsSync(output + '.return'); attempt++) await delay(50);
     assert.equal(readFileSync(output + '.return', 'utf8'), expectedReturn, diagnostics);
   });
