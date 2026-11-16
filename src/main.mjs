@@ -65,16 +65,18 @@ async function start(qq, config, existingWebUI) {
     out.log('warn', `当前 QQ 版本 ${qq.version} 未经过完整实机验证（已验证版本：${verifiedVersions.join('、')}），如遇异常请查看运行诊断`);
   }
   const channel = await createNativeChannel();
-  const convert = createEventConverter();
+  let network;
+  const convert = createEventConverter({ mediaUrl: (filePath, fileName) => network?.mediaUrl(filePath, fileName) ?? null });
   // Sources of image / voice / video / file segments (local path, base64, URL) are fetched into this folder before sending.
   const media = createMediaPreparer({ dir: join(runtimeDir, 'media') });
   media.sweep().catch(() => {});
   let current = { phase: 'starting', version: qq.version, bootstrap: 'cpp-native' };
   let webui;
-  let network;
   const execute = async (request, source) => {
     const started = performance.now();
-    const response = await dispatchAction(channel, convert, request, { media, version: pkg.version });
+    const response = await dispatchAction(channel, convert, request, {
+      media, version: pkg.version, mediaUrl: (filePath, fileName) => network?.mediaUrl(filePath, fileName) ?? null,
+    });
     webui?.publish('action', { request, response, source, elapsed: Math.round(performance.now() - started) });
     // Terminal actions are printed by the input loop; external actions are mirrored here.
     if (source !== 'terminal') out.action(request, response, source);

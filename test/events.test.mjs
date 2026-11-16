@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setImmediate } from 'node:timers/promises';
 import nativeEvents from '../native/events.cjs';
 import system from '../native/system.cjs';
@@ -357,4 +360,67 @@ test('an optional listener registration failure leaves other services receiving 
   assert.equal(events.at(-1).type, 'message');
   hook.dispose();
   assert.deepEqual(removed, [1]);
+});
+
+test('received images trigger downloadRichMedia when missing on disk, preserve sourcePath/thumbPath, and expose mediaUrl or path fallback', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'openqq-recv-img-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const oriPath = join(dir, 'downloaded.png');
+  const thumbPath = join(dir, 'thumb.png');
+  await writeFile(thumbPath, Buffer.from('thumb-bytes'));
+
+  const downloads = [];
+  const raw = [];
+  const events = [];
+  const convert = createEventConverter({ mediaUrl: (p, f) => `http://127.0.0.1:3001/openqq/media/${encodeURIComponent(f)}?p=${encodeURIComponent(p)}` });
+  let receive;
+  receive = nativeEvents.createEventReceiver({
+    getUixConvertService: () => ({ getUin: async uids => ({ uinInfo: new Map(uids.map(uid => [uid, '654321'])) }) }),
+    getMsgService: () => ({
+      async downloadRichMedia(req) {
+        downloads.push(req);
+        if (req.msgId === '101') {
+          await writeFile(oriPath, Buffer.from('real-png-bytes'));
+          // Intermediate thumbnail notification must not prematurely resolve original download.
+          queueMicrotask(async () => {
+            await receive('msg', 'onRichMediaDownloadComplete', [{ msgId: '101', msgElementId: '201', thumbSize: 198, filePath: thumbPath, fileErrCode: '0', trasferStatus: 2 }]);
+            await receive('msg', 'onRichMediaDownloadComplete', [{ msgId: '101', msgElementId: '201', thumbSize: 0, filePath: oriPath, fileErrCode: '0', trasferStatus: 2 }]);
+          });
+          return { result: 0 };
+        }
+        return { result: 5, errMsg: 'denied' };
+      },
+    }),
+  }, self, event => { raw.push(event); const converted = convert(event); if (converted) events.push(converted); }, () => true, { mediaTimeoutMs: 100 });
+
+  // Case 1: missing sourcePath -> downloadRichMedia downloads oriPath, segments carry path + url.
+  await receive('msg', 'onRecvMsg', [[base({
+    msgId: '101',
+    elements: [{ elementType: 2, elementId: '201', picElement: { fileName: 'pic.png', md5HexStr: 'abc', fileUuid: 'uuid-1', fileSize: '14', sourcePath: '' } }],
+  })]]);
+  assert.equal(downloads.length, 1);
+  assert.deepEqual([downloads[0].downloadType, downloads[0].thumbSize, downloads[0].elementId], [1, 0, '201']);
+  const imgData = events[0].message[0].data;
+  assert.equal(imgData.path, oriPath);
+  assert.match(imgData.url, /^http:\/\/127\.0\.0\.1:3001\/openqq\/media\/pic\.png/);
+  assert.match(events[0].raw_message, /url=http:\/\/127\.0\.0\.1:3001/);
+
+  // Case 2: downloadRichMedia fails -> falls back to thumbPath and reports non-fatal event_error without dropping message.
+  await receive('msg', 'onRecvMsg', [[base({
+    msgId: '102',
+    elements: [{ elementType: 2, elementId: '202', picElement: { fileName: 'fallback.png', fileUuid: 'uuid-2', thumbPath: new Map([[198, thumbPath]]) } }],
+  })]]);
+  assert.equal(events[1].message[0].data.path, thumbPath);
+  assert.equal(raw.some(e => e.type === 'event_error' && e.stage === 'msg/image'), true);
+
+  // Case 3: pure reverse WS (mediaUrl returns null) falls back data.file to local path for AstrBot/local readers.
+  const reverseConvert = createEventConverter({ mediaUrl: () => null });
+  const revEvent = reverseConvert(raw.find(e => e.type === 'message' && e.message.msgId === '101'));
+  assert.equal(revEvent.message[0].data.file, oriPath);
+  assert.equal(revEvent.message[0].data.path, oriPath);
+  assert.equal(revEvent.message[0].data.url, undefined);
+
+  // Case 4: resolveMedia resolves cached image by fileName or fileUuid for get_image.
+  const resolved = await receive.resolveMedia('uuid-1', 'image');
+  assert.deepEqual([resolved.file, resolved.file_name, resolved.file_size], [oriPath, 'pic.png', 14]);
 });

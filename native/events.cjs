@@ -1,5 +1,8 @@
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
+const { fail } = require('./common.cjs');
 const { readSystemEvent } = require('./system.cjs');
 const validUin = value => /^[1-9]\d*$/.test(String(value)) && Number.isSafeInteger(Number(value));
 const now = () => Math.floor(Date.now() / 1000);
@@ -9,8 +12,28 @@ const FORWARD_LIMIT = 200;
 const FORWARD_BYTES = 512 * 1024;
 // A member who just joined or left is often unknown to every UID store until QQ pushes the refreshed member list.
 const MEMBER_RETRY_MS = 1500;
+const MEDIA_TIMEOUT_MS = 12000;
 
-function createEventReceiver(session, self, report, current, { memberRetryMs = MEMBER_RETRY_MS } = {}) {
+async function existingFile(filePath) {
+  if (typeof filePath !== 'string' || !filePath) return undefined;
+  try {
+    const info = await fs.promises.stat(filePath);
+    return info.isFile() && info.size > 0 ? filePath : undefined;
+  } catch { return undefined; }
+}
+
+async function pickThumbPath(thumbPath) {
+  const entries = thumbPath instanceof Map ? [...thumbPath.entries()]
+    : thumbPath && typeof thumbPath === 'object' ? Object.entries(thumbPath) : [];
+  entries.sort(([a], [b]) => (Number(a) === 0 ? -1 : Number(b) === 0 ? 1 : Number(b) - Number(a)));
+  for (const [, candidate] of entries) {
+    const ready = await existingFile(candidate);
+    if (ready) return ready;
+  }
+  return undefined;
+}
+
+function createEventReceiver(session, self, report, current, { memberRetryMs = MEMBER_RETRY_MS, mediaTimeoutMs = MEDIA_TIMEOUT_MS } = {}) {
   const cache = new Map();
   const seenShapes = new Set();
   const members = new Map();
@@ -141,6 +164,141 @@ function createEventReceiver(session, self, report, current, { memberRetryMs = M
   }
   const lookupRecent = ref => recent.get(`${ref.chatType}:${ref.peerUid}:${ref.msgId}`);
 
+  // Received rich-media index (for get_image) and download completion waiters (onRichMediaDownloadComplete).
+  const mediaCache = new Map();
+  const downloadWaiters = new Map();
+  const inflightMedia = new Map();
+  function cacheMediaKey(key, entry) {
+    if (typeof key !== 'string' || !key) return;
+    mediaCache.delete(key);
+    mediaCache.set(key, entry);
+    if (mediaCache.size > 5000) mediaCache.delete(mediaCache.keys().next().value);
+  }
+  function rememberMedia(element, ctx, msgId, resolvedPath) {
+    const map = { 2: 'picElement', 3: 'fileElement', 4: 'pttElement', 5: 'videoElement' };
+    const field = map[element?.elementType];
+    const value = field ? element[field] : null;
+    if (!value || typeof value !== 'object') return;
+    const entry = {
+      elementType: element.elementType,
+      chatType: ctx.peer.chatType,
+      peerUid: String(ctx.peer.peerUid),
+      msgId: String(msgId ?? ''),
+      elementId: String(element.elementId ?? ''),
+      fileName: String(value.fileName ?? ''),
+      md5: String(value.md5HexStr ?? value.fileMd5 ?? ''),
+      fileUuid: String(value.fileUuid ?? ''),
+      fileSize: Number(value.fileSize ?? 0) || 0,
+      path: typeof resolvedPath === 'string' && resolvedPath ? resolvedPath : (typeof value.sourcePath === 'string' && value.sourcePath ? value.sourcePath : (typeof value.filePath === 'string' ? value.filePath : '')),
+      url: typeof value.originImageUrl === 'string' && /^https?:\/\//.test(value.originImageUrl) ? value.originImageUrl : '',
+      thumbPath: value.thumbPath,
+    };
+    cacheMediaKey(entry.fileName, entry);
+    cacheMediaKey(entry.md5, entry);
+    cacheMediaKey(entry.fileUuid, entry);
+    cacheMediaKey(entry.path, entry);
+    if (entry.msgId && entry.elementId) cacheMediaKey(`${entry.msgId}:${entry.elementId}`, entry);
+  }
+  function resolveDownloadNotify(notify) {
+    if (!notify || typeof notify !== 'object') return;
+    const key = `${notify.msgId ?? ''}:${notify.msgElementId ?? ''}`;
+    const waiters = downloadWaiters.get(key);
+    if (!waiters || !waiters.size) return;
+    // Ignore thumbnail progress/completion while waiting for an original (thumbSize=0) download.
+    if (notify.thumbSize !== undefined && Number(notify.thumbSize) !== 0) return;
+    const errCode = notify.fileErrCode !== undefined && String(notify.fileErrCode) !== '' && String(notify.fileErrCode) !== '0';
+    const failed = errCode || (notify.trasferStatus !== undefined && ![0, 2].includes(Number(notify.trasferStatus)));
+    for (const waiter of [...waiters]) {
+      if (failed) waiter.reject(new Error(notify.fileErrMsg || `QQ 富媒体下载失败 (${notify.fileErrCode || notify.trasferStatus})`));
+      else waiter.resolve(typeof notify.filePath === 'string' ? notify.filePath : '');
+    }
+  }
+  async function downloadPicture(entry) {
+    const ready = await existingFile(entry.path);
+    if (ready) return ready;
+    const service = session.getMsgService?.();
+    if (typeof service?.downloadRichMedia !== 'function' || !/^\d+$/.test(entry.msgId) || !entry.elementId) {
+      return pickThumbPath(entry.thumbPath);
+    }
+    const inflightKey = `${entry.chatType}:${entry.peerUid}:${entry.msgId}:${entry.elementId}`;
+    if (inflightMedia.has(inflightKey)) return inflightMedia.get(inflightKey);
+    const task = (async () => {
+      const waitKey = `${entry.msgId}:${entry.elementId}`;
+      let timer;
+      let waiter;
+      const completed = new Promise((resolve, reject) => {
+        waiter = {
+          resolve: value => { clearTimeout(timer); waiters.delete(waiter); if (!waiters.size) downloadWaiters.delete(waitKey); resolve(value); },
+          reject: error => { clearTimeout(timer); waiters.delete(waiter); if (!waiters.size) downloadWaiters.delete(waitKey); reject(error); },
+        };
+        let waiters = downloadWaiters.get(waitKey);
+        if (!waiters) { waiters = new Set(); downloadWaiters.set(waitKey, waiters); }
+        waiters.add(waiter);
+        timer = setTimeout(() => waiter.reject(new Error('图片下载超时')), mediaTimeoutMs);
+      });
+      completed.catch(() => {});
+      try {
+        const result = await service.downloadRichMedia({
+          fileModelId: '0',
+          downSourceType: 0,
+          triggerType: 1,
+          msgId: entry.msgId,
+          chatType: entry.chatType,
+          peerUid: entry.peerUid,
+          elementId: entry.elementId,
+          thumbSize: 0,
+          filePath: '',
+          downloadType: 1,
+        });
+        if (!current()) throw new Error('会话已失效');
+        if (result?.result !== undefined && result.result !== 0) {
+          throw new Error(result.errMsg || `QQ 拒绝下载图片 (${result.result})`);
+        }
+        const already = await existingFile(entry.path);
+        if (already) {
+          waiter.resolve(already);
+          return already;
+        }
+        const notifiedPath = await completed;
+        const verified = await existingFile(notifiedPath) || await existingFile(entry.path);
+        if (verified) { entry.path = verified; return verified; }
+        throw new Error('QQ 下载完成但未生成图片文件');
+      } catch (error) {
+        waiter?.reject(error);
+        throw error;
+      } finally {
+        clearTimeout(timer);
+      }
+    })().finally(() => inflightMedia.delete(inflightKey));
+    inflightMedia.set(inflightKey, task);
+    return task;
+  }
+  async function resolveMedia(key, kind) {
+    if (typeof key !== 'string' || !key.trim()) throw fail('缺少图片标识 file', 1400);
+    const trimmed = key.trim();
+    const entry = mediaCache.get(trimmed) ?? mediaCache.get(path.basename(trimmed));
+    if (!entry) throw fail('找不到对应的图片记录（仅支持本次运行期间收到的图片）', 1404);
+    if (kind === 'image' && entry.elementType !== 2) throw fail('该标识不是图片', 1400);
+    let localPath = await existingFile(entry.path);
+    if (!localPath) {
+      try { localPath = await downloadPicture(entry); }
+      catch (error) {
+        localPath = await pickThumbPath(entry.thumbPath);
+        if (!localPath) throw fail(error.message, 1500);
+      }
+    }
+    if (!localPath) throw fail('图片文件不存在或尚未下载', 1404);
+    entry.path = localPath;
+    cacheMediaKey(localPath, entry);
+    const stat = await fs.promises.stat(localPath);
+    return {
+      file: localPath,
+      file_name: entry.fileName || path.basename(localPath),
+      file_size: stat.size || entry.fileSize,
+      url: entry.url,
+    };
+  }
+
   // Merged forwards: QQ fetches the content with getMultiMsg(peer, rootMsgId, parentMsgId), where root is the
   // message in the chat and parent is the message that directly carries the (possibly nested) forward.
   async function multiMsg(peer, root, parent) {
@@ -184,6 +342,43 @@ function createEventReceiver(session, self, report, current, { memberRetryMs = M
         const target = await optionalUin(text.atNtUid, 'msg/at');
         return target ? { ...element, textElement: { ...text, atUid: target } } : element;
       }
+      if (element.elementType === 2 && element.picElement) {
+        const pic = element.picElement;
+        if (ctx.skipDownload) {
+          rememberMedia(element, ctx, msgId, pic.sourcePath);
+          return element;
+        }
+        let resolved = await existingFile(pic.sourcePath);
+        if (!resolved && typeof session.getMsgService?.()?.downloadRichMedia === 'function' && /^\d+$/.test(String(msgId)) && element.elementId) {
+          const entry = {
+            elementType: 2,
+            chatType: ctx.peer.chatType,
+            peerUid: String(ctx.peer.peerUid),
+            msgId: String(msgId),
+            elementId: String(element.elementId),
+            fileName: String(pic.fileName ?? ''),
+            md5: String(pic.md5HexStr ?? ''),
+            fileUuid: String(pic.fileUuid ?? ''),
+            fileSize: Number(pic.fileSize ?? 0) || 0,
+            path: String(pic.sourcePath ?? ''),
+            url: typeof pic.originImageUrl === 'string' && /^https?:\/\//.test(pic.originImageUrl) ? pic.originImageUrl : '',
+            thumbPath: pic.thumbPath,
+          };
+          try {
+            resolved = await downloadPicture(entry);
+          } catch (error) {
+            if (!current()) throw error;
+            emit({ type: 'event_error', stage: 'msg/image', error: error.message + '，将继续上报消息' });
+            resolved = await pickThumbPath(pic.thumbPath);
+          }
+          rememberMedia(element, ctx, msgId, resolved || '');
+          return { ...element, picElement: { ...pic, sourcePath: resolved || '' } };
+        }
+        if (!resolved) resolved = await pickThumbPath(pic.thumbPath);
+        rememberMedia(element, ctx, msgId, resolved || pic.sourcePath);
+        return resolved ? { ...element, picElement: { ...pic, sourcePath: resolved } } : element;
+      }
+      if ([3, 4, 5].includes(element.elementType)) rememberMedia(element, ctx, msgId);
       const forward = element.multiForwardMsgElement;
       if (element.elementType === 16 && forward && /^\d+$/.test(msgId)) {
         const ref = { chatType: ctx.peer.chatType, peerUid: ctx.peer.peerUid, root: ctx.root, parent: msgId };
@@ -279,7 +474,7 @@ function createEventReceiver(session, self, report, current, { memberRetryMs = M
     const senderUin = await uin(input.senderUid, input.senderUin);
     record(input, senderUin);
     const elements = await prepare(input.elements ?? [], { peer: { chatType: input.chatType, peerUid: String(input.peerUid) },
-      root: String(input.msgId), depth: 0, budget: { left: FORWARD_LIMIT } }, String(input.msgId));
+      root: String(input.msgId), depth: 0, budget: { left: FORWARD_LIMIT }, skipDownload: String(senderUin) === self.uin }, String(input.msgId));
     emit({ type: 'message', self, message: { ...input, senderUin, elements } });
     if (input.chatType === 2) for (const element of elements) {
       const file = element.fileElement;
@@ -316,6 +511,8 @@ function createEventReceiver(session, self, report, current, { memberRetryMs = M
         await batch(args[0], value => message(value, name === 'onMsgInfoListUpdate'), name);
         return;
       }
+      if (name === 'onRichMediaDownloadComplete') { resolveDownloadNotify(args[0]); return; }
+      if (name === 'onRichMediaProgerssUpdate' || name === 'onRichMediaUploadComplete') return;
       if (name === 'onRecvSysMsg') {
         const event = readSystemEvent(args[0]);
         if (!event) { native(source, name, args); return; }
@@ -407,9 +604,10 @@ function createEventReceiver(session, self, report, current, { memberRetryMs = M
     }
     native(source, name, args);
   }
-  // Services the action handler shares: forward fetching, quoted-message metadata and self-sent records.
+  // Services the action handler shares: forward fetching, quoted-message metadata, media cache and self-sent records.
   receive.expandForward = expandForward;
   receive.lookupRecent = lookupRecent;
+  receive.resolveMedia = resolveMedia;
   receive.record = record;
   receive.groups = groups;
   return receive;

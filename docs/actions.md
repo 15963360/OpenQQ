@@ -31,7 +31,7 @@
 | 类别 | 动作 |
 | --- | --- |
 | 发送 | `send_private_msg`、`send_group_msg`、`send_msg` |
-| 消息 | `get_forward_msg`、`delete_msg`（撤回） |
+| 消息 | `get_forward_msg`、`get_image`、`delete_msg`（撤回） |
 | 群管理 | `set_group_kick`、`set_group_ban`、`set_group_whole_ban`、`set_group_admin`、`set_group_card`、`set_group_name`、`set_group_leave`、`set_group_add_request` |
 | 好友 | `set_friend_add_request`、`send_like` |
 | 查询 | `get_group_list`、`get_group_info`、`get_group_member_list`、`get_group_member_info`、`get_login_info`、`get_status`、`get_version_info`、`can_send_image`、`can_send_record` |
@@ -76,7 +76,7 @@
 
 - 本机的绝对路径，如 `C:\pics\a.png`；
 - `file://` 地址；
-- `base64://` 加 base64 数据；
+- `base64://` 或 `data:...;base64,` 数据；
 - `http://` 或 `https://` 链接。
 
 不接受相对路径、网络路径（`\\server\share`）和设备路径。

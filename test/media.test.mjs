@@ -113,16 +113,18 @@ test('images and files resolve from local paths, file:// URLs and base64, and lo
     { type: 'image', data: { file: image } },
     { type: 'image', data: { file: pathToFileURL(image).href } },
     { type: 'image', data: { file: 'base64://' + png(10, 20).toString('base64'), summary: '[图]' } },
+    { type: 'image', data: { file: 'data:image/png;base64,' + png(12, 16).toString('base64') } },
     { type: 'text', data: { text: 'keep me' } },
   ] });
-  const [local, url, inline, text] = prepared.params.message;
+  const [local, url, inline, dataUri, text] = prepared.params.message;
   assert.deepEqual([local.data.openqq_media.kind, local.data.openqq_media.format, local.data.openqq_media.width, local.data.openqq_media.height, local.data.openqq_media.path], ['image', 'png', 64, 32, image]);
   assert.equal(url.data.openqq_media.path.toLowerCase(), image.toLowerCase());
   assert.equal(inline.data.openqq_media.width, 10);
   assert.notEqual(inline.data.openqq_media.path, image);
   assert.equal(inline.data.summary, '[图]');
+  assert.equal(dataUri.data.openqq_media.width, 12);
   assert.deepEqual(text, { type: 'text', data: { text: 'keep me' } });
-  assert.equal((await readdir(w.temp)).length, 1);
+  assert.equal((await readdir(w.temp)).length, 2);
   await prepared.release();
   assert.equal((await readdir(w.temp)).length, 0, 'temporary files are removed');
   assert.ok((await stat(image)).isFile(), 'the caller\'s own file is untouched');

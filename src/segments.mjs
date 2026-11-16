@@ -1,7 +1,20 @@
 function numeric(value) { return /^\d+$/.test(String(value)) && Number.isSafeInteger(Number(value)); }
 const text = value => typeof value === 'string' && value.length > 0;
 
-export function convertSegment(element, replyId, forward) {
+function firstPath(value) {
+  for (const candidate of [value.filePath, value.sourcePath]) {
+    if (text(candidate)) return candidate;
+  }
+  const thumbs = value.thumbPath instanceof Map ? [...value.thumbPath.entries()]
+    : value.thumbPath && typeof value.thumbPath === 'object' ? Object.entries(value.thumbPath) : [];
+  thumbs.sort(([a], [b]) => (Number(a) === 0 ? -1 : Number(b) === 0 ? 1 : Number(b) - Number(a)));
+  for (const [, candidate] of thumbs) {
+    if (text(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+export function convertSegment(element, replyId, forward, mediaUrl) {
   const fallback = () => ({ type: 'openqq_element', data: { element_type: element.elementType, element } });
   if (element.elementType === 1) {
     const value = element.textElement;
@@ -22,8 +35,14 @@ export function convertSegment(element, replyId, forward) {
     const file = value.fileName || value.md5HexStr || value.fileUuid;
     if (!text(file)) return fallback();
     const data = { file, ...(value.fileUuid ? { file_id: String(value.fileUuid) } : {}) };
-    if (text(value.filePath)) data.path = value.filePath;
+    const localPath = firstPath(value);
+    if (localPath) data.path = localPath;
     if (text(value.originImageUrl) && /^https?:\/\//.test(value.originImageUrl)) data.url = value.originImageUrl;
+    else if (localPath && typeof mediaUrl === 'function') {
+      const served = mediaUrl(localPath, file);
+      if (text(served)) data.url = served;
+      else if (element.elementType === 2) data.file = localPath;
+    }
     if (numeric(value.fileSize)) data.file_size = Number(value.fileSize);
     return { type: media[0], data };
   }

@@ -1,9 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setImmediate } from 'node:timers/promises';
 import { Readable } from 'node:stream';
 import { once } from 'node:events';
 import nativeActions from '../native/actions.cjs';
+import nativeEvents from '../native/events.cjs';
 import sessionModule from '../native/session.cjs';
 import { createEventConverter } from '../src/onebot.mjs';
 import { createNativeChannel } from '../src/ipc.mjs';
@@ -246,4 +250,55 @@ test('authenticated IPC runs a text send and typing action end-to-end with a sha
   assert.equal(sends, 1);
   assert.equal(inputs, 1);
   assert.equal((await dispatchAction(channel, converter, { action: 'unknown', echo: null })).retcode, 1404);
+});
+
+test('get_image validates parameters, resolves received images via IPC and enriches with url and base64', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'openqq-get-image-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const picPath = join(dir, 'cat.png');
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  await writeFile(picPath, bytes);
+
+  const channel = await createNativeChannel();
+  t.after(() => channel.close());
+  let listener;
+  const service = {
+    addKernelMsgListener(value) { listener = value; return 1; },
+    removeKernelMsgListener() {},
+  };
+  const session = {
+    init(_config, _a, _b, callbacks) { callbacks.onSessionInitComplete({ result: 0 }); },
+    getMsgService: () => service,
+    getUixConvertService: () => ({ getUid: async () => ({ uidInfo: new Map() }) }),
+  };
+  const connected = once(channel.events, 'connected');
+  const facade = sessionModule.startNative({ pipe: channel.path, token: channel.token }, { NodeIQQNTWrapperSession: { get: () => session } });
+  t.after(() => globalThis.__openqq_hook?.dispose());
+  await connected;
+  const ready = new Promise(resolve => channel.events.on('event', event => { if (event.type === 'session_ready') resolve(); }));
+  facade.NodeIQQNTWrapperSession.get().init({ selfUin: self.uin, selfUid: self.uid }, {}, {}, {});
+  await ready;
+
+  const converter = createEventConverter();
+  assert.equal((await dispatchAction(channel, converter, { action: 'get_image', params: {} })).retcode, 1400);
+  assert.equal((await dispatchAction(channel, converter, { action: 'get_image', params: { file: 'missing.png' } })).retcode, 1404);
+
+  const delivered = new Promise(resolve => channel.events.on('event', event => { if (event.type === 'message') resolve(); }));
+  listener.onRecvMsg([{
+    chatType: 1, msgId: '501', msgTime: '1794470400', peerUid: 'u_other', peerUin: '654321', senderUid: 'u_other', senderUin: '654321',
+    elements: [{ elementType: 2, elementId: '901', picElement: { fileName: 'cat.png', md5HexStr: 'deadbeef', fileUuid: 'uuid-cat', fileSize: String(bytes.length), sourcePath: picPath } }],
+  }]);
+  await delivered;
+
+  const res = await dispatchAction(channel, converter, { action: 'get_image', params: { file: 'cat.png' }, echo: 'img-1' }, {
+    mediaUrl: (p, f) => `http://127.0.0.1:3001/openqq/media/id/${f}`,
+  });
+  assert.equal(res.status, 'ok');
+  assert.equal(res.echo, 'img-1');
+  assert.deepEqual([res.data.file, res.data.filename, res.data.file_name, res.data.size, res.data.file_size, res.data.base64],
+    [picPath, 'cat.png', 'cat.png', bytes.length, bytes.length, bytes.toString('base64')]);
+  assert.equal(res.data.url, 'http://127.0.0.1:3001/openqq/media/id/cat.png');
+
+  assert.equal(typeof nativeEvents.createEventReceiver, 'function');
+  globalThis.__openqq_hook?.dispose();
 });

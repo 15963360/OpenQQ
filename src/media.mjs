@@ -300,8 +300,9 @@ export function createMediaPreparer({ dir, allowPrivate = process.env.OPENQQ_MED
     if (typeof value !== 'string' || !value.trim()) throw fail(`${kind} 段缺少 file`);
     const source = value.trim();
     const limit = max[kind];
-    if (source.startsWith('base64://')) {
-      const text = source.slice(9).replace(/\s+/g, '');
+    const dataUri = source.match(/^data:[^;,]+;base64,([\s\S]+)$/i);
+    if (source.startsWith('base64://') || dataUri) {
+      const text = (dataUri ? dataUri[1] : source.slice(9)).replace(/\s+/g, '');
       if (!text || !/^[A-Za-z0-9+/]+={0,2}$/.test(text) || text.length % 4 !== 0) throw fail('base64 数据无效');
       if (text.length / 4 * 3 > limit + 3) throw fail(`文件超过 ${limit / MiB} MiB 上限`);
       const path = await tempFile();

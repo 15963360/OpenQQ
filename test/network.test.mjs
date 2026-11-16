@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import WebSocket, { WebSocketServer } from 'ws';
 import { defaultConfig } from '../src/config.mjs';
 import { startOneBot } from '../src/network.mjs';
@@ -10,11 +13,11 @@ function inbox(socket) {
   socket.on('message', data => { const item = JSON.parse(data.toString()); if (waiters.length) waiters.shift()(item); else queue.push(item); });
   return () => queue.length ? Promise.resolve(queue.shift()) : new Promise(resolve => waiters.push(resolve));
 }
-async function fixture(t, dispatch) {
+async function fixture(t, dispatch, options = {}) {
   const config = defaultConfig(); config.ws.port = 0;
   let state;
   const requests = [];
-  const network = await startOneBot({ config, dispatch: dispatch ?? (async request => { requests.push(request); return { status: 'ok', retcode: 0, data: { message_id: 123 }, echo: request.echo }; }), onStatus: value => { state = value; } });
+  const network = await startOneBot({ config, dispatch: dispatch ?? (async request => { requests.push(request); return { status: 'ok', retcode: 0, data: { message_id: 123 }, echo: request.echo }; }), onStatus: value => { state = value; }, ...options });
   t.after(() => network.close());
   return { network, config, address: state.ws.address, requests };
 }
@@ -73,13 +76,42 @@ test('heartbeat reports online status and switches to offline without leaking co
 
 test('forward WS bounds action concurrency and rejects oversized frames', async t => {
   const complete = [];
-  const { network, address, config } = await fixture(t, req => new Promise(resolve => complete.push(() => resolve({ status: 'ok', retcode: 0, data: null, echo: req.echo }))));
+  const { network, address, config } = await fixture(t, req => new Promise(resolve => complete.push(() => resolve({ status: 'ok', retcode: 0, data: null, echo: req.echo }))), { maxPayload: 256 * 1024 });
   network.setStatus({ phase: 'session_ready', self_id: 12345 });
   const { socket, next } = await client(t, address, config.accessToken); await next();
   for (let i = 0; i < 9; i++) socket.send(JSON.stringify({ action: 'get_status', echo: i }));
   const rejected = await next(); assert.equal(rejected.retcode, 1503); assert.equal(rejected.echo, 8); assert.equal(complete.length, 8);
   complete.forEach(resolve => resolve()); for (let i = 0; i < 8; i++) assert.equal((await next()).status, 'ok');
   const closed = once(socket, 'close'); socket.send('x'.repeat(256 * 1024 + 1)); assert.equal((await closed)[0], 1009);
+});
+
+test('forward WS accepts large base64 frames by default and serves registered media safely', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'openqq-net-media-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89]);
+  const picPath = join(dir, 'sample.png');
+  await writeFile(picPath, pngBytes);
+
+  const { network, address, config } = await fixture(t);
+  network.setStatus({ phase: 'session_ready', self_id: 12345 });
+  const { socket, next } = await client(t, address, config.accessToken); await next();
+  const largeBase64 = 'A'.repeat(512 * 1024);
+  socket.send(JSON.stringify({ action: 'send_private_msg', params: { user_id: 44, message: [{ type: 'image', data: { file: 'base64://' + largeBase64 } }] }, echo: 'big' }));
+  assert.equal((await next()).echo, 'big');
+
+  const url = network.mediaUrl(picPath, 'photo.png');
+  assert.ok(url && url.startsWith('http://127.0.0.1:'));
+  assert.equal(network.mediaUrl(picPath, 'photo.png'), url, 'same file reuses its capability URL');
+  const fetched = await fetch(url);
+  assert.equal(fetched.status, 200);
+  assert.equal(fetched.headers.get('content-type'), 'image/png');
+  assert.equal(fetched.headers.get('x-content-type-options'), 'nosniff');
+  assert.deepEqual(Buffer.from(await fetched.arrayBuffer()), pngBytes);
+
+  const origin = new URL(url).origin;
+  assert.equal((await fetch(origin + '/openqq/media/' + '0'.repeat(64) + '/missing.png')).status, 404);
+  assert.equal((await fetch(origin + '/openqq/media/bad')).status, 404);
+  assert.equal((await fetch(origin + '/')).status, 426);
 });
 
 test('reverse WS waits for account, sends auth headers, dispatches and reconnects without replay', async t => {
@@ -89,6 +121,7 @@ test('reverse WS waits for account, sends auth headers, dispatches and reconnect
   config.reverseWs = [{ enabled: true, url: 'ws://127.0.0.1:' + bot.address().port + '/onebot', token: 'robot-secret' }];
   const network = await startOneBot({ config, dispatch: async req => ({ status: 'ok', retcode: 0, data: null, echo: req.echo }) });
   t.after(() => network.close());
+  assert.equal(network.mediaUrl('C:\\temp\\a.png', 'a.png'), null);
   assert.equal(bot.clients.size, 0);
   let joined = once(bot, 'connection'); network.setStatus({ phase: 'session_ready', self_id: 87654 });
   const [socket, req] = await joined; const next = inbox(socket);

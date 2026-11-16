@@ -124,6 +124,13 @@ function validateAction(request) {
     if (!ref) throw fail('合并转发 id 无效或已过期（仅支持本次运行期间收到的消息）', 1404);
     return { kind: 'forward', ref };
   }
+  if (request.action === 'get_image') {
+    const raw = params.file ?? params.file_id;
+    if (typeof raw !== 'string' || !raw.trim() || raw.length > 1024 || /[\u0000-\u001f]/.test(raw)) {
+      throw fail('get_image 需要有效的 file 或 file_id');
+    }
+    return { kind: 'get_image', key: raw.trim() };
+  }
   const managed = admin.validate(request, params);
   if (managed) return managed;
   if (!sendActions.includes(request.action)) throw fail('尚未支持动作: ' + request.action, 1404);
@@ -216,6 +223,12 @@ function createActionHandler(session, self, current, options = {}) {
           const messages = await options.expandForward(action.ref);
           ensure();
           return { self, forward: { ref: action.ref, messages } };
+        }
+        if (action.kind === 'get_image') {
+          if (typeof options.resolveMedia !== 'function') throw fail('当前会话不支持获取图片', 1500);
+          const media = await options.resolveMedia(action.key, 'image');
+          ensure();
+          return media;
         }
         if (admin.kinds.has(action.kind)) {
           return await admin.run(action, {

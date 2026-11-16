@@ -1,7 +1,31 @@
+import { readFile, stat } from 'node:fs/promises';
+import { basename } from 'node:path';
 import nativeActions from '../native/actions.cjs';
 
 const fail = (message, retcode = 1400) => Object.assign(new Error(message), { retcode });
 const sendActions = ['send_private_msg', 'send_group_msg', 'send_msg'];
+const MAX_IMAGE_BASE64_BYTES = 16 * 1024 * 1024;
+
+async function formatImageResult(data, mediaUrl) {
+  const file = String(data?.file ?? '');
+  const remoteUrl = typeof data?.url === 'string' && /^https?:\/\//.test(data.url) ? data.url : '';
+  let size = Number(data?.file_size ?? 0) || 0;
+  let exists = false;
+  if (file) {
+    try {
+      const info = await stat(file);
+      if (info.isFile()) { exists = true; size = info.size; }
+    } catch { /* fallback below */ }
+  }
+  if (!exists && !remoteUrl) throw fail('图片文件不存在或尚未下载', 1404);
+  const fileName = String(data?.file_name || (file ? basename(file) : '') || 'image');
+  const url = remoteUrl || (exists && typeof mediaUrl === 'function' ? (mediaUrl(file, fileName) ?? '') : '');
+  let base64;
+  if (exists && size > 0 && size <= MAX_IMAGE_BASE64_BYTES) {
+    try { base64 = (await readFile(file)).toString('base64'); } catch { /* best effort */ }
+  }
+  return { file, filename: fileName, file_name: fileName, size, file_size: size, url, ...(base64 ? { base64 } : {}) };
+}
 
 // OneBot ids are local to this process; translate them into the native references QQ needs before validation.
 function resolveReferences(converter, request) {
@@ -63,6 +87,9 @@ export async function dispatchAction(channel, converter, request, options = {}) 
       }
       if (response.status === 'ok' && action.kind === 'forward') {
         response = { status: 'ok', retcode: 0, data: converter.forwardResult(response.data.self, response.data.forward) };
+      }
+      if (response.status === 'ok' && action.kind === 'get_image') {
+        response = { status: 'ok', retcode: 0, data: await formatImageResult(response.data, options.mediaUrl) };
       }
     }
   } catch (error) {

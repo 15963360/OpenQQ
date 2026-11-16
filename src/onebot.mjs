@@ -8,7 +8,7 @@ function integer(value, field, min = 0) {
 }
 const id = (value, field) => integer(value, field, 1);
 
-export function createEventConverter() {
+export function createEventConverter({ mediaUrl } = {}) {
   const ids = new Map();
   const refs = new Map();
   const seen = new Map();
@@ -45,7 +45,7 @@ export function createEventConverter() {
   function forwardNodes(selfId, ref, messages) {
     return messages.map(item => {
       const segments = (item.elements ?? []).map(element => convertSegment(element,
-        original => messageRef(selfId, ref, original), inner => forwardSegment(selfId, inner)));
+        original => messageRef(selfId, ref, original), inner => forwardSegment(selfId, inner), mediaUrl));
       const userId = /^[1-9]\d*$/.test(String(item.senderUin)) && Number.isSafeInteger(Number(item.senderUin)) ? Number(item.senderUin) : 0;
       const nickname = String(item.sendMemberName || item.sendNickName || '');
       const time = /^\d+$/.test(String(item.msgTime)) ? Number(item.msgTime) : 0;
@@ -76,7 +76,7 @@ export function createEventConverter() {
       const senderId = id(message.senderUin, 'user_id');
       if (senderId === selfId) return null;
       const segments = message.elements.map(element => convertSegment(element, original => messageRef(selfId, message, original),
-        ref => forwardSegment(selfId, ref)));
+        ref => forwardSegment(selfId, ref), mediaUrl));
       event = { post_type: 'message', message_type: message.chatType === 2 ? 'group' : 'private',
         sub_type: message.chatType === 2 ? 'normal' : message.chatType === 100 ? 'group' : 'other',
         message_id: messageRef(selfId, message), user_id: senderId, message: segments, raw_message: cqString(segments),
