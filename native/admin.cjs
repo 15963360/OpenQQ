@@ -58,12 +58,13 @@ function validate(request, params) {
     case 'get_group_info': return { kind: 'group_info', group: group() };
     case 'get_group_member_list': return { kind: 'group_member_list', group: group() };
     case 'get_group_member_info': return { kind: 'group_member_info', group: group(), user: user() };
+    case 'get_stranger_info': return { kind: 'stranger_info', user: user() };
     default: return null;
   }
 }
 
 const kinds = new Set(['group_kick', 'group_ban', 'group_whole_ban', 'group_admin', 'group_card', 'group_name', 'group_leave', 'group_request', 'friend_request',
-  'delete_msg', 'send_like', 'group_list', 'group_info', 'group_member_list', 'group_member_info']);
+  'delete_msg', 'send_like', 'group_list', 'group_info', 'group_member_list', 'group_member_info', 'stranger_info']);
 
 // QQ reports refusals inside the resolved value; methods that return nothing are treated as accepted.
 function outcome(result, what) {
@@ -82,6 +83,14 @@ function memberOf(group, info) {
   return { group_id: Number(group), user_id: number(info.uin), nickname: String(info.nick ?? ''), card: String(info.cardName ?? ''), sex: 'unknown', age: 0, area: '',
     join_time: number(info.joinTime), last_sent_time: number(info.lastSpeakTime), level: String(info.memberRealLevel ?? 0), role: roleName(info.role), unfriendly: false,
     title: String(info.memberSpecialTitle ?? ''), title_expire_time: 0, card_changeable: false, shut_up_timestamp: number(info.shutUpTime) };
+}
+
+// QQ's sex enum: 1 male, 2 female, anything else unknown.
+function strangerOf(user, detail) {
+  const core = detail?.simpleInfo?.coreInfo ?? {};
+  const info = detail?.simpleInfo?.baseInfo ?? {};
+  const number = value => Number.isSafeInteger(Number(value)) && Number(value) >= 0 ? Number(value) : 0;
+  return { user_id: Number(user), nickname: String(core.nick ?? detail?.nick ?? ''), sex: info.sex === 1 ? 'male' : info.sex === 2 ? 'female' : 'unknown', age: number(info.age) };
 }
 
 async function run(action, ctx) {
@@ -158,6 +167,15 @@ async function run(action, ctx) {
       if (!info) info = (await members(action.group, true)).find(value => String(value.uin) === action.user);
       if (!info) throw fail('没有找到这个群成员', 1404);
       return memberOf(action.group, info);
+    }
+    case 'stranger_info': {
+      const result = outcome(await session.getProfileService().getUserDetailInfoByUin(action.user), '获取用户资料');
+      ensure();
+      if (!result?.detail || typeof result.detail !== 'object') throw fail('没有找到这个用户', 1404);
+      const stranger = strangerOf(action.user, result.detail);
+      // QQ answers an unregistered number with an empty record instead of an error; every real account has a nickname.
+      if (!stranger.nickname) throw fail('没有找到这个用户', 1404);
+      return stranger;
     }
     default: throw fail('尚未支持动作: ' + action.kind, 1404);
   }

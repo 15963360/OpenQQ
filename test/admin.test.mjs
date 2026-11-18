@@ -38,7 +38,8 @@ function fixture(t, overrides = {}) {
     getGroupService: () => groupService,
     getBuddyService: () => ({ approvalFriendRequest: record('approvalFriendRequest') }),
     getMsgService: () => ({ recallMsg: record('recallMsg') }),
-    getProfileService: () => ({ getUidByUin: async (_scope, uins) => new Map(uins.map(uin => [uin, 'u_' + uin])) }),
+    getProfileService: () => ({ getUidByUin: async (_scope, uins) => new Map(uins.map(uin => [uin, 'u_' + uin])),
+      getUserDetailInfoByUin: async uin => { calls.push(['getUserDetailInfoByUin', uin]); return overrides.detail?.(uin) ?? { result: 0, errMsg: '', detail: { uin, simpleInfo: { coreInfo: { nick: '路人' }, baseInfo: { sex: 2, age: 23 } } } }; } }),
     getProfileLikeService: () => ({ setBuddyProfileLike: record('setBuddyProfileLike') }),
     getUixConvertService: () => ({ getUid: async uins => ({ uidInfo: new Map(uins.map(uin => [uin, 'u_' + uin])) }) }),
     ...overrides.session,
@@ -111,7 +112,7 @@ test('invalid parameters are rejected before anything reaches QQ', async t => {
     ['set_friend_add_request', { flag: 'g:1:7:2' }, /flag 无效/], ['set_friend_add_request', { flag: 'f:bad:1' }, /flag 无效/], ['set_friend_add_request', { flag: 'f:u_a:1', approve: 'x' }, /approve/],
     ['delete_msg', {}, /message_id/], ['delete_msg', { openqq_ref: { chatType: 4, peerUid: 'x', msgId: '1' } }, /message_id/], ['delete_msg', { openqq_ref: { chatType: 2, peerUid: 'x', msgId: 'abc' } }, /message_id/],
     ['send_like', { user_id: 1, times: 0 }, /times/], ['send_like', { user_id: 1, times: 21 }, /times/],
-    ['get_group_info', {}, /group_id/], ['get_group_member_info', { group_id: 1 }, /user_id/],
+    ['get_group_info', {}, /group_id/], ['get_group_member_info', { group_id: 1 }, /user_id/], ['get_stranger_info', {}, /user_id/],
   ];
   for (const [action, params, pattern] of bad) await assert.rejects(ok(f, action, params), pattern, action + ' ' + JSON.stringify(params));
   assert.deepEqual(f.calls, []);
@@ -208,4 +209,18 @@ test('request flags produced by events can be answered by the matching actions',
   assert.deepEqual(admin.FRIEND_REQUEST.exec('f:u_a-b_c:1794470400').slice(1), ['u_a-b_c', '1794470400']);
   assert.equal(admin.GROUP_REQUEST.test('g:98:7:1; drop'), false);
   assert.equal(admin.FRIEND_REQUEST.test('f:../x:1'), false);
+});
+
+test('get_stranger_info maps QQ profile data to OneBot and reports unknown users and refusals', async t => {
+  const f = fixture(t);
+  assert.deepEqual(await ok(f, 'get_stranger_info', { user_id: '654321' }), { user_id: 654321, nickname: '路人', sex: 'female', age: 23 });
+  assert.deepEqual(f.calls, [['getUserDetailInfoByUin', '654321']]);
+  const unknown = fixture(t, { detail: () => ({ result: 0, errMsg: '', detail: { simpleInfo: { coreInfo: { nick: 'x' }, baseInfo: { sex: 255, age: -1 } } } }) });
+  assert.deepEqual(await ok(unknown, 'get_stranger_info', { user_id: 7 }), { user_id: 7, nickname: 'x', sex: 'unknown', age: 0 });
+  const missing = fixture(t, { detail: () => ({ result: 0, errMsg: '' }) });
+  await assert.rejects(ok(missing, 'get_stranger_info', { user_id: 8 }), error => error.retcode === 1404);
+  const empty = fixture(t, { detail: () => ({ result: 0, errMsg: '', detail: { simpleInfo: { coreInfo: { nick: '' }, baseInfo: { sex: 0, age: 0 } } } }) });
+  await assert.rejects(ok(empty, 'get_stranger_info', { user_id: 10 }), error => error.retcode === 1404);
+  const refused = fixture(t, { detail: () => ({ result: 3, errMsg: '用户不存在' }) });
+  await assert.rejects(ok(refused, 'get_stranger_info', { user_id: 9 }), error => error.retcode === 1500 && /QQ 拒绝获取用户资料：用户不存在/.test(error.message));
 });

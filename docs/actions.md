@@ -34,7 +34,7 @@
 | 消息 | `get_forward_msg`、`get_image`、`delete_msg`（撤回） |
 | 群管理 | `set_group_kick`、`set_group_ban`、`set_group_whole_ban`、`set_group_admin`、`set_group_card`、`set_group_name`、`set_group_leave`、`set_group_add_request` |
 | 好友 | `set_friend_add_request`、`send_like` |
-| 查询 | `get_group_list`、`get_group_info`、`get_group_member_list`、`get_group_member_info`、`get_login_info`、`get_status`、`get_version_info`、`can_send_image`、`can_send_record` |
+| 查询 | `get_group_list`、`get_group_info`、`get_group_member_list`、`get_group_member_info`、`get_stranger_info`、`get_login_info`、`get_status`、`get_version_info`、`can_send_image`、`can_send_record` |
 | 扩展 | `set_input_status` |
 
 没有列出的动作返回 `1404`。这个版本的 QQ 没有提供戳一戳发送和设置群头衔的接口，所以 `send_poke` 和 `set_group_special_title` 不在其中。
@@ -129,6 +129,7 @@ ffmpeg 取自 `PATH`，也可以用环境变量 `OPENQQ_FFMPEG` 指定。`silk-w
 | `get_group_info` | 单个群，字段同上，来自最近一次群列表；没有这个群返回 `1404` |
 | `get_group_member_list` | 数组，元素含 `user_id`、`nickname`、`card`、`role`（`owner`/`admin`/`member`）、`title`、`join_time`、`last_sent_time`、`level`、`shut_up_timestamp` 等 |
 | `get_group_member_info` | 单个成员，字段同上；没有这个成员返回 `1404` |
+| `get_stranger_info` | `user_id`、`nickname`、`sex`（`male`/`female`/`unknown`）、`age`；QQ 里查不到这个用户返回 `1404` |
 
 `shut_up_timestamp` 是禁言到期的时间戳（秒），没被禁言为 0。性别、年龄、地区还没有接入，分别固定为 `unknown`、`0`、空。
 
