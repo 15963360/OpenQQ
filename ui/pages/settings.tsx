@@ -111,12 +111,13 @@ export default function Settings() {
           </div>
         </Section>
 
-        <Section icon={Database} title="数据与保留" description="OpenQQ 不持久化消息内容">
+        <Section icon={Database} title="数据与保留" description="OpenQQ 本身不持久化消息内容；图形化 Bot 的记忆除外">
           <DescriptionList items={[
             ['事件与日志', '服务端内存中保留最近 200 条（不超过 2 MiB），重启后清空'],
             ['会话消息', '由当前标签页根据实时事件整理，关闭后清空'],
             ['吞吐指标', '服务端内存中按分钟统计最近 60 分钟'],
             ['QQ 原始日志', <span className="font-mono text-caption">.runtime/qq.log</span>],
+            ['Bot 数据', <span>积木程序、AI 设置（含 API Key）和 Bot 记忆保存在 <span className="font-mono text-caption">data/bot/</span>；只有「记住对话」开启的 Bot 才会保存对话内容，可在 Bot 页面导出或清空</span>],
             ['配置文件', <span className="break-all font-mono text-caption">{config.query.data?.configPath ?? 'config/openqq.json'}</span>],
           ]} />
         </Section>

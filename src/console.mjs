@@ -186,7 +186,7 @@ export function createConsole({ stdout = process.stdout, stderr = process.stderr
       const actionKey = request?.action;
       const name = sanitizeTerminal(Object.hasOwn(actionNames, actionKey) ? actionNames[actionKey] : actionKey ?? '输入', false);
       const target = sanitizeTerminal(actionTarget(request), false);
-      const from = source === 'webui' ? paint('gray', ' (WebUI)') : source === 'onebot' ? paint('gray', ' (OneBot)') : '';
+      const from = source === 'webui' ? paint('gray', ' (WebUI)') : source === 'onebot' ? paint('gray', ' (OneBot)') : source === 'bot' ? paint('gray', ' (Bot)') : '';
       const echo = response && Object.hasOwn(response, 'echo') ? paint('gray', ` echo=${sanitizeTerminal(JSON.stringify(response.echo), false)}`) : '';
       if (response?.status === 'ok') {
         const data = response.data == null ? '' : response.data.message_id !== undefined ? paint('gray', ` #${response.data.message_id}`) : ' ' + paint('gray', sanitizeTerminal(JSON.stringify(response.data), false));

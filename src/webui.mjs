@@ -4,15 +4,21 @@ import { readFile } from 'node:fs/promises';
 import { availableParallelism } from 'node:os';
 
 // Client-side routes of the single-page console; each one serves index.html.
-const pages = ['/', '/messages', '/events', '/actions', '/logs', '/account', '/connections', '/settings'];
+const pages = ['/', '/messages', '/events', '/actions', '/logs', '/account', '/connections', '/bot', '/ai', '/settings'];
 const files = new Map([
   ...pages.map(path => [path, ['index.html', 'text/html; charset=utf-8']]),
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  // 积木编辑器（Blockly）单独打包，只在打开 Bot 页面时才加载。
+  ['/blocks.js', ['blocks.js', 'text/javascript; charset=utf-8']],
   ['/styles.css', ['app.css', 'text/css; charset=utf-8']],
   ['/theme.css', ['theme.css', 'text/css; charset=utf-8']],
   ['/fonts/inter.woff2', ['fonts/inter.woff2', 'font/woff2']],
   ['/fonts/mono.woff2', ['fonts/mono.woff2', 'font/woff2']],
   ['/logo.svg', ['logo.svg', 'image/svg+xml']],
+  // Blockly's sprites and cursors (copied by ui/build.mjs).
+  ...[['sprites.png', 'image/png'], ['handopen.cur', 'image/x-icon'], ['handclosed.cur', 'image/x-icon'], ['handdelete.cur', 'image/x-icon'], ['delete-icon.svg', 'image/svg+xml'],
+    ['dropdown-arrow.svg', 'image/svg+xml'], ['foldout-icon.svg', 'image/svg+xml'], ['resize-handle.svg', 'image/svg+xml'], ['1x1.gif', 'image/gif'], ['pilcrow.png', 'image/png'],
+    ['quote0.png', 'image/png'], ['quote1.png', 'image/png']].map(([name, type]) => ['/blockly-media/' + name, ['blockly-media/' + name, type]]),
   ['/setup', ['setup.html', 'text/html; charset=utf-8']],
 ]);
 const limit = 2 * 1024 * 1024;
@@ -63,7 +69,7 @@ function createMetrics() {
   };
 }
 
-export async function startWebUI({ port = 17860, host = '127.0.0.1', allowedHosts = [], status = { phase: 'detached' }, dispatch, configuration } = {}) {
+export async function startWebUI({ port = 17860, host = '127.0.0.1', allowedHosts = [], status = { phase: 'detached' }, dispatch, configuration, bot } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('WebUI 端口必须为 0..65535 的整数');
   if (!['127.0.0.1', '0.0.0.0'].includes(host)) throw new Error('WebUI 监听地址仅支持 127.0.0.1 或 0.0.0.0');
   const token = randomBytes(32).toString('hex');
@@ -130,8 +136,8 @@ export async function startWebUI({ port = 17860, host = '127.0.0.1', allowedHost
     if (!request.url || !request.url.startsWith('/') || request.url.startsWith('//')) {
       json(response, 400, { message: '请求地址无效' }); return;
     }
-    let path;
-    try { path = new URL(request.url, origin).pathname; }
+    let path, query;
+    try { const parsed = new URL(request.url, origin); path = parsed.pathname; query = parsed.searchParams; }
     catch { json(response, 400, { message: '请求地址无效' }); return; }
     if (request.method === 'GET' && assets.has(path)) {
       const asset = assets.get(path);
@@ -158,8 +164,14 @@ export async function startWebUI({ port = 17860, host = '127.0.0.1', allowedHost
     if (request.method === 'GET' && path === '/api/config' && configuration) {
       json(response, 200, configuration.get()); return;
     }
+    const botRoute = Boolean(bot) && path.startsWith('/api/bot/');
+    async function runBot(body) {
+      try { json(response, 200, await bot.handle({ method: request.method, path, query, body })); }
+      catch (error) { if (!response.headersSent && !response.destroyed) json(response, Number.isInteger(error.status) ? error.status : 400, { message: error.message }); }
+    }
+    if (request.method === 'GET' && botRoute) { runBot(undefined); return; }
     const postRoutes = ['/api/action', '/api/config', '/api/start', ...(configuration?.check ? ['/api/check'] : [])];
-    if (request.method !== 'POST' || !postRoutes.includes(path) || (path !== '/api/action' && !configuration)) {
+    if (request.method !== 'POST' || !(botRoute || (postRoutes.includes(path) && (path === '/api/action' || configuration)))) {
       json(response, 404, { message: '未找到入口' }); return;
     }
     if (!/^application\/json(?:;|$)/i.test(request.headers['content-type'] ?? '')) {
@@ -173,6 +185,7 @@ export async function startWebUI({ port = 17860, host = '127.0.0.1', allowedHost
       try {
         const action = await readJsonBody(request, response);
         if (action === undefined) return;
+        if (botRoute) { await runBot(action); return; }
         if (path !== '/api/action') {
           try {
             const result = path === '/api/config' ? await configuration.save(action)

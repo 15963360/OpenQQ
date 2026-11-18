@@ -1,4 +1,4 @@
-import { Activity, Braces, Cable, CircleUserRound, LayoutDashboard, MessagesSquare, ScrollText, Settings, type LucideIcon } from 'lucide-react';
+import { Activity, Blocks, Braces, Cable, CircleUserRound, LayoutDashboard, MessagesSquare, ScrollText, Settings, Sparkles, type LucideIcon } from 'lucide-react';
 
 export interface NavItem { path: string; title: string; description: string; icon: LucideIcon; keywords?: string }
 export interface NavGroup { id: string; title: string; items: NavItem[] }
@@ -7,6 +7,10 @@ export const navGroups: NavGroup[] = [
   { id: 'workspace', title: '工作台', items: [
     { path: '/', title: '概览', description: '会话状态、吞吐与连接健康', icon: LayoutDashboard, keywords: 'dashboard overview home' },
     { path: '/messages', title: '消息', description: '按会话查看和发送消息', icon: MessagesSquare, keywords: 'messages chat send' },
+  ] },
+  { id: 'bot', title: 'Bot', items: [
+    { path: '/bot', title: 'Bot 编程', description: '拖积木编制 Bot，设置人设和记忆', icon: Blocks, keywords: 'bot blocks scratch blockly program memory persona ai 积木 机器人 人设 记忆 广告' },
+    { path: '/ai', title: 'AI 接入', description: '填写 API Key 与 Base URL，选择模型', icon: Sparkles, keywords: 'ai api key base url model openai relay zelix 模型 接入' },
   ] },
   { id: 'debug', title: '调试', items: [
     { path: '/events', title: '事件', description: '实时 OneBot 事件与动作回执', icon: Activity, keywords: 'events inspector stream' },

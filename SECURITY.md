@@ -20,3 +20,4 @@ OpenQQ 运行在 QQ 客户端进程内，并对外提供 OneBot WebSocket 接口
 
 - WebUI 仅监听 `127.0.0.1`，不要通过端口转发或反向代理暴露到公网。
 - OneBot `accessToken` 请使用至少 16 位的随机字符串，并且不要提交到版本控制。
+- 图形化 Bot 的 AI API Key 保存在 `data/bot/ai.json`，请同样不要提交或分享；备份 `data/` 时注意其中包含它。

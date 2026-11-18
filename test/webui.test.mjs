@@ -48,6 +48,20 @@ test('WebUI serves local assets with restrictive headers and never embeds its ac
   assert.equal((await fetch(web.origin + '/api/stream', { headers: { Authorization: 'Bearer wrong' } })).status, 401);
 });
 
+test('WebUI serves the block editor bundle and its Blockly media locally, and the new pages', async t => {
+  const { web } = await fixture(t);
+  for (const [path, type] of [['/blocks.js', 'text/javascript'], ['/blockly-media/sprites.png', 'image/png'], ['/blockly-media/handopen.cur', 'image/x-icon'], ['/bot', 'text/html'], ['/ai', 'text/html']]) {
+    const response = await fetch(web.origin + path);
+    assert.equal(response.status, 200, path);
+    assert.ok(response.headers.get('content-type').startsWith(type), path);
+  }
+  const editor = await (await fetch(web.origin + '/blocks.js')).text();
+  // The editor must point Blockly at the local media folder instead of its default CDN, which the CSP would block.
+  assert.ok(editor.includes('/blockly-media/'));
+  assert.equal((await fetch(web.origin + '/api/bot/ai')).status, 401);
+  assert.equal((await fetch(web.origin + '/api/bot/ai', { headers: { Authorization: 'Bearer x' } })).status, 401);
+});
+
 test('WebUI rejects foreign origins and rebinding Host headers before dispatching actions', async t => {
   let actions = 0;
   const { web, headers } = await fixture(t, { dispatch: async () => { actions++; } });

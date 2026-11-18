@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync, renameSync, readFileSync, createWriteStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { inspectQQ, resolveLinuxWrapper, bootstrapInput, verifiedVersions } from './qq.mjs';
 import { detectEnvironment, isQQProcessRunning, probeNative } from './env.mjs';
 import { createNativeChannel } from './ipc.mjs';
@@ -16,9 +16,15 @@ import { startWebUI } from './webui.mjs';
 import { defaultConfig, readConfig, saveConfig } from './config.mjs';
 import { setupCLI } from './setup.mjs';
 import { startOneBot } from './network.mjs';
+import { createBotStore } from './bot/store.mjs';
+import { createAIClient } from './bot/ai.mjs';
+import { createBotEngine } from './bot/engine.mjs';
+import { createBotApi } from './bot/api.mjs';
 
 const projectDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const runtimeDir = join(projectDir, '.runtime');
+// Bot 的数据（积木程序、记忆、AI 设置和 Key）放在 data/bot，不放在会被清理的 .runtime 里；容器部署请挂载这个目录。
+const dataDir = process.env.OPENQQ_DATA_DIR ? resolve(process.env.OPENQQ_DATA_DIR) : join(projectDir, 'data');
 const { values, positionals } = parseArgs({ allowPositionals: true, options: {
   'qq-root': { type: 'string' },
   'web-port': { type: 'string' },
@@ -46,6 +52,16 @@ function promptFor(paint, state) {
   const style = ['offline', 'hook_error'].includes(state.phase) ? 'red bold' : 'yellow bold';
   return `${paint(style, '○')} ${paint('gray', label)} ${paint('cyan bold', '›')} `;
 }
+
+// 图形化 Bot：存储、AI 客户端和引擎在进程启动时创建一次。引擎发送消息用的 dispatch 在 QQ 挂接成功后才接上；
+// 没挂接时（配置向导/预览模式）WebUI 仍然能编辑积木、记忆和 AI 设置，只是不会收到消息。
+let botDispatch = async () => ({ status: 'failed', retcode: 1502, data: null, message: 'QQ 尚未就绪' });
+let botLog = () => {};
+const botStore = createBotStore({ dir: join(dataDir, 'bot') });
+const botAI = createAIClient({ settings: () => botStore.readAi() });
+const botEngine = createBotEngine({ store: botStore, ai: botAI, dispatch: request => botDispatch(request), log: entry => botLog(entry) });
+const botApi = createBotApi({ store: botStore, engine: botEngine, ai: botAI });
+for (const item of botStore.skipped) out.log('warn', `Bot ${item.id} 无法载入：${item.error}`);
 
 function checkClient(qq) {
   const supportedHost = (process.platform === 'win32' && process.arch === 'x64')
@@ -85,6 +101,13 @@ async function start(qq, config, existingWebUI) {
   try {
     webui = existingWebUI ?? await configurationWebUI(config, true);
     webui.setDispatch(request => execute(request, 'webui'));
+    botDispatch = request => execute(request, 'bot');
+    // 只有出错或被限流的运行才进入事件流/终端；成功的运行记录在 WebUI 的 Bot 页面里查看。
+    botLog = entry => {
+      if (entry.status === 'ok') return;
+      webui.publish('diagnostic', { type: 'bot_run', ...entry });
+      out.log('warn', `Bot「${entry.botName}」${entry.status === 'limited' ? '被限流' : '运行出错'}：${entry.error}`);
+    };
     network = await startOneBot({ config, dispatch: request => execute(request, 'onebot'), onStatus: networkState => {
       current = { ...current, network: networkState }; webui.setStatus(current);
     } });
@@ -123,6 +146,8 @@ async function start(qq, config, existingWebUI) {
           out.event(converted);
           webui.publish('event', converted);
           network.broadcast(converted);
+          // 同步历史消息期间不让 Bot 回复，避免对旧消息做出反应。
+          if (current.phase === 'session_ready' && !current.syncing) botEngine.handleEvent(converted).catch(() => {});
         }
       } else {
         webui.publish('diagnostic', event);
@@ -189,6 +214,8 @@ async function start(qq, config, existingWebUI) {
     driver.stdout.destroy();
     driver.stderr.destroy();
     driver.unref();
+    botDispatch = async () => ({ status: 'failed', retcode: 1502, data: null, message: 'QQ 尚未就绪' });
+    botLog = () => {};
     await channel.close();
     await network.close();
     process.removeListener('SIGINT', onSignal);
@@ -210,7 +237,7 @@ const webAllowedHosts = (process.env.OPENQQ_WEB_ALLOW_HOSTS ?? '').split(',').ma
 async function configurationWebUI(config, running = false) {
   webRunning = running;
   let webui;
-  webui = await startWebUI({ port: Number(values['web-port'] ?? config.webPort), host: webHost, allowedHosts: webAllowedHosts,
+  webui = await startWebUI({ port: Number(values['web-port'] ?? config.webPort), host: webHost, allowedHosts: webAllowedHosts, bot: botApi,
     status: { phase: savedConfig ? 'detached' : 'setup' }, configuration: {
     get: () => {
       const currentConfig = savedConfig ?? config;
@@ -281,3 +308,4 @@ try {
   }
   else throw new Error('用法: npm run init、npm run webui、npm run doctor 或 npm start');
 } catch (error) { out.log('error', error.message); process.exitCode = 1; }
+finally { botEngine.close(); }

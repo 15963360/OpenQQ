@@ -61,6 +61,8 @@ docker compose logs -f
 
 1. **配置向导**：如果尚未生成 `./docker-data/config/openqq.json`，从日志中复制 `http://127.0.0.1:17860/setup#token=...` 在浏览器完成配置并点击「启动 OpenQQ」。
 2. **扫码登录 QQ**：打开 `http://127.0.0.1:6080/vnc.html?autoconnect=true`，在虚拟桌面里的 QQ 窗口扫码或输入密码登录。登录态保存在 `./docker-data/qq`，后续重启容器无需重新扫码。
+
+图形化 Bot 的积木程序、记忆和 AI 设置（含 API Key）保存在容器里的 `/app/data`，`compose.yaml` 已把它挂载到 `./docker-data/data`；请不要删除这个目录，也不要把它提交或分享。详见 [bot.md](bot.md)。
 3. **关闭 VNC（可选）**：完成登录并启用自动登录后，可在 `compose.yaml` 中设置 `OPENQQ_VNC: "0"` 后重建容器，减少后台进程占用。
 
 ### 自动初始化配置（无交互启动）
@@ -98,6 +100,7 @@ docker run --rm -v /opt/QQ:/opt/QQ:ro openqq:noqq doctor
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `OPENQQ_CONFIG` | `/app/config/openqq.json` | 配置文件路径 |
+| `OPENQQ_DATA_DIR` | `/app/data` | 图形化 Bot 的数据目录（积木程序、记忆、AI 设置） |
 | `OPENQQ_QQ_ROOT` | `/opt/QQ` | 容器内 QQ 安装目录 |
 | `OPENQQ_WEB_PORT` | `17860` | WebUI 端口 |
 | `OPENQQ_WEB_HOST` | `0.0.0.0` | WebUI 容器内监听地址（宿主机侧建议仅映射 `127.0.0.1`） |

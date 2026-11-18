@@ -23,11 +23,13 @@ import Logs from './pages/logs';
 import Account from './pages/account';
 import Connections from './pages/connections';
 import Settings from './pages/settings';
+import BotPage from './pages/bot';
+import AiPage from './pages/ai';
 import Setup from './pages/setup';
 
 const pages: Record<string, ComponentType> = {
   '/': Overview, '/messages': Messages, '/events': Events, '/actions': ApiExplorer, '/logs': Logs,
-  '/account': Account, '/connections': Connections, '/settings': Settings,
+  '/account': Account, '/connections': Connections, '/bot': BotPage, '/ai': AiPage, '/settings': Settings,
 };
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } });
@@ -42,7 +44,7 @@ function Shell() {
   useEffect(() => connectStream(), []);
   useEffect(() => { if (phase === 'setup' && pathname !== '/setup') navigate('/setup', { replace: true }); }, [phase, pathname]);
   useEffect(() => {
-    const title = { '/': '概览', '/messages': '消息', '/events': '事件', '/actions': 'API 调试', '/logs': '运行日志', '/account': '账号', '/connections': '连接', '/settings': '设置', '/setup': '接入向导' }[pathname];
+    const title = { '/': '概览', '/messages': '消息', '/events': '事件', '/actions': 'API 调试', '/logs': '运行日志', '/account': '账号', '/connections': '连接', '/bot': 'Bot 编程', '/ai': 'AI 接入', '/settings': '设置', '/setup': '接入向导' }[pathname];
     document.title = (title ? title + ' · ' : '') + 'OpenQQ';
   }, [pathname]);
   if (pathname === '/setup') return <Setup />;

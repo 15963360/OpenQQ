@@ -99,7 +99,7 @@ COPY --from=builder /app/web ./web
 COPY --from=builder /app/config/openqq.example.json ./config/openqq.example.json
 COPY LICENSE ./LICENSE
 COPY docker/entrypoint.sh /usr/local/bin/openqq-entrypoint.sh
-RUN chmod +x /usr/local/bin/openqq-entrypoint.sh && mkdir -p /app/config /app/.runtime
+RUN chmod +x /usr/local/bin/openqq-entrypoint.sh && mkdir -p /app/config /app/data /app/.runtime
 
 ENV NODE_ENV=production \
     DISPLAY=:99 \

@@ -15,7 +15,8 @@ export function describeEntry(entry) {
   if (entry.kind === 'action') return { kind: 'action', title: String(value.request?.action || '动作'),
     text: value.response?.status === 'ok' ? '执行成功' : String(value.response?.message || '执行失败'), source: 'OneBot', failed: value.response?.status === 'failed' };
   if (entry.kind === 'diagnostic') return { kind: 'diagnostic', title: String(value.type || '运行日志'),
-    text: String(value.error || value.event || value.stage || '运行状态更新'), source: String(value.source || 'OpenQQ'), failed: ['event_error', 'hook_error'].includes(value.type) };
+    text: String(value.error || value.event || value.stage || '运行状态更新'), source: String(value.source || 'OpenQQ'),
+    failed: ['event_error', 'hook_error'].includes(value.type) || (value.type === 'bot_run' && value.status === 'error') };
   if (value.post_type === 'message') return { kind: 'message', title: String(value.sender?.card || value.sender?.nickname || value.user_id || '消息'), text: segmentText(value.message), source };
   if (value.post_type === 'request') return { kind: 'request', title: value.request_type === 'friend' ? '好友申请' : '群申请', text: String(value.comment || '没有验证留言'), source };
   const names = { group_recall: '群消息撤回', friend_recall: '私聊撤回', group_increase: '成员加入', group_decrease: '成员离开', group_admin: '管理员变更', group_ban: '禁言变更', group_upload: '文件上传', friend_add: '新增好友', group_card: '群名片变更', bot_offline: 'QQ 已掉线' };
@@ -35,6 +36,7 @@ export function describeLog(entry) {
     case 'offline': return { level: 'error', message: '账号已掉线' };
     case 'hook_error': return { level: 'error', message: `挂接失败 ${stage}${value.error ?? ''}`.trim() };
     case 'event_error': return { level: 'warn', message: `事件处理失败 ${stage}${value.error ?? ''}`.trim() };
+    case 'bot_run': return { level: value.status === 'limited' ? 'warn' : 'error', message: `Bot「${value.botName ?? ''}」${value.status === 'limited' ? '被限流' : '运行出错'}：${value.error ?? ''}` };
     case 'native_callback': return { level: 'debug', message: `未适配回调 ${value.source ?? ''}/${value.event ?? ''}` };
     default: return { level: 'debug', message: String(value.error || value.event || value.stage || value.type || '运行状态更新') };
   }

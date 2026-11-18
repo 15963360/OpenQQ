@@ -109,3 +109,8 @@
 .json-key { color: var(--muted-foreground); }
 .json-string { color: var(--foreground); }
 .json-number, .json-literal { color: var(--foreground); font-weight: 600; }
+
+/* Block editor (Blockly). Tailwind's preflight makes every <svg> display:block, which overrides the display="none"
+   attribute Blockly uses to hide scrollbars; without this the flyout's scrollbar stays visible after the flyout closes. */
+.blocklySvg [display="none"], .blocklyScrollbarVertical[display="none"], .blocklyScrollbarHorizontal[display="none"] { display: none; }
+.blocklyWidgetDiv, .blocklyDropDownDiv, .blocklyTooltipDiv { font-family: var(--font-sans); }

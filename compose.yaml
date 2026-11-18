@@ -16,6 +16,7 @@ services:
       - "127.0.0.1:6080:6080"   # noVNC screen for first-time QQ login / captcha
     volumes:
       - ./docker-data/config:/app/config
+      - ./docker-data/data:/app/data      # Bot programs, memories and the AI API key
       - ./docker-data/qq:/root/.config/QQ
     environment:
       TZ: Asia/Shanghai
