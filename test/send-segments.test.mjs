@@ -144,8 +144,11 @@ test('voice, file and video use QQ\'s own element shapes, and a video cover land
   const voice = await f.run(group([{ type: 'record', data: { openqq_media: media('record', { path: await f.put('v.slk', voiceBytes), name: 'v.slk', size: voiceBytes.length, duration: 7 }) } }]));
   const ptt = voice.elements[0].pttElement;
   assert.equal(voice.elements[0].elementType, 4);
-  assert.deepEqual([ptt.md5HexStr, ptt.fileSize, ptt.duration, ptt.formatType, ptt.voiceType, ptt.fileName, ptt.canConvert2Text], [md5(voiceBytes), String(voiceBytes.length), 7, 1, 1, md5(voiceBytes) + '.amr', true]);
+  assert.deepEqual([ptt.md5HexStr, ptt.fileSize, ptt.duration, ptt.formatType, ptt.voiceType, ptt.fileName, ptt.canConvert2Text], [md5(voiceBytes), String(voiceBytes.length), 7, 1, 0, md5(voiceBytes) + '.amr', false]);
   assert.equal(ptt.waveAmplitudes.length, 50);
+  // QQ iterates the keys of this nested object while sending; a missing one is what broke voice in issue #7.
+  assert.deepEqual(ptt.otherBusinessInfo, { aiVoiceInfo: null, aiVoiceType: 0 });
+  assert.deepEqual([ptt.playState, ptt.storeID, ptt.text, ptt.fileId], [0, 1, '', 0]);
   assert.equal(f.requested[0].elementType, 4);
 
   const fileBytes = Buffer.from('zip data');

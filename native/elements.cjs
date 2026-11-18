@@ -63,8 +63,12 @@ function createElementBuilder({ session, ensure, groupCode, memberUid, memberNam
       const md5 = await md5File(media.path);
       const staged = await stage(service(), media.path, ELEMENT.ptt, md5 + '.amr');
       ensure();
+      // The field set mirrors a pttElement QQ itself produced. QQ enumerates the keys of the nested `otherBusinessInfo`
+      // while sending, so leaving it out fails with only "Cannot convert undefined or null to object" (issue #7).
       return base(ELEMENT.ptt, 'pttElement', { fileName: md5 + '.amr', filePath: staged.target, md5HexStr: staged.md5, fileSize: String(staged.size), duration: media.duration,
-        formatType: 1, voiceType: 1, voiceChangeType: 0, canConvert2Text: true, waveAmplitudes: WAVEFORM, fileSubId: '', playState: 1, autoConvertText: 0 });
+        formatType: 1, voiceType: 0, voiceChangeType: 0, canConvert2Text: false, autoConvertText: 0, waveAmplitudes: WAVEFORM, playState: 0,
+        fileId: 0, fileUuid: '', fileSubId: '', fileBizId: null, storeID: 1, text: '', translateStatus: 0, transferStatus: 0, progress: 0, invalidState: 0,
+        import_rich_media_context: null, otherBusinessInfo: { aiVoiceInfo: null, aiVoiceType: 0 }, isInApplicationDataPath: null });
     },
     async video(part) {
       const media = part.media;
