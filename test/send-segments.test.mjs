@@ -1,13 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
+import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import nativeActions from '../native/actions.cjs';
 import cq from '../native/cq.cjs';
+import sessionModule from '../native/session.cjs';
 import { createEventConverter } from '../src/onebot.mjs';
+import { createNativeChannel } from '../src/ipc.mjs';
+import { createMediaPreparer } from '../src/media.mjs';
 import { dispatchAction } from '../src/actions.mjs';
 
 const self = { uin: '123456', uid: 'u_self' };
@@ -232,4 +236,54 @@ test('dispatchAction normalizes CQ strings, prepares media, lengthens the IPC wa
   assert.deepEqual((await dispatchAction(channel, converter, { action: 'can_send_image' })).data, { yes: true });
   assert.deepEqual((await dispatchAction(channel, converter, { action: 'can_send_record' })).data, { yes: true });
   assert.equal(calls.length, 1);
+});
+
+test('dispatchAction sends a base64:// image larger than the 1 MiB IPC frame limit once media preparation strips source fields', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'openqq-ipc-media-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const temp = join(root, 'temp');
+  const channel = await createNativeChannel();
+  t.after(() => channel.close());
+  let listener;
+  const sends = [];
+  const service = {
+    addKernelMsgListener(value) { listener = value; return 1; },
+    removeKernelMsgListener() {},
+    generateMsgUniqueId: () => '9007199254740993',
+    getRichMediaFilePathForGuild(request) { return join(root, 'QQ', 'Pic', request.md5HexStr + extname(request.fileName)); },
+    async sendMsg(_id, peer, elements) {
+      sends.push({ peer, elements });
+      queueMicrotask(() => listener.onMsgInfoListUpdate([{ ...peer, senderUin: self.uin, sendStatus: 2, msgId: '9007199254742001' }]));
+      return { result: 0 };
+    },
+  };
+  const session = {
+    init(_config, _a, _b, callbacks) { callbacks.onSessionInitComplete({ result: 0 }); },
+    getMsgService: () => service,
+    getMSFService: () => ({ getServerTime: () => '1794470400' }),
+  };
+  const connected = once(channel.events, 'connected');
+  const facade = sessionModule.startNative({ pipe: channel.path, token: channel.token }, { NodeIQQNTWrapperSession: { get: () => session } });
+  t.after(() => globalThis.__openqq_hook?.dispose());
+  await connected;
+  const ready = new Promise(resolve => channel.events.on('event', event => { if (event.type === 'session_ready') resolve(); }));
+  facade.NodeIQQNTWrapperSession.get().init({ selfUin: self.uin, selfUid: self.uid }, {}, {}, {});
+  await ready;
+
+  const bigPng = Buffer.alloc(800 * 1024);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bigPng);
+  bigPng.writeUInt32BE(13, 8); bigPng.write('IHDR', 12, 'latin1'); bigPng.writeUInt32BE(64, 16); bigPng.writeUInt32BE(32, 20);
+  bigPng[24] = 8; bigPng[25] = 6;
+  const base64 = bigPng.toString('base64');
+  assert.ok(Buffer.byteLength(base64) > 1024 * 1024);
+
+  const converter = createEventConverter();
+  const response = await dispatchAction(channel, converter, group([{ type: 'image', data: { file: 'base64://' + base64, summary: '[大图]' } }]), {
+    media: createMediaPreparer({ dir: temp }),
+  });
+  assert.deepEqual(response, { status: 'ok', retcode: 0, data: { message_id: 1 } });
+  assert.equal(sends.length, 1);
+  assert.equal(sends[0].elements[0].picElement.fileSize, bigPng.length);
+  assert.equal(sends[0].elements[0].picElement.summary, '[大图]');
+  assert.deepEqual(await readdir(temp), [], 'temporary file created from base64 is released');
 });

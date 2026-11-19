@@ -122,6 +122,9 @@ test('images and files resolve from local paths, file:// URLs and base64, and lo
   assert.equal(inline.data.openqq_media.width, 10);
   assert.notEqual(inline.data.openqq_media.path, image);
   assert.equal(inline.data.summary, '[图]');
+  for (const seg of [local, url, inline, dataUri]) {
+    for (const key of ['file', 'url', 'thumb', 'cover']) assert.equal(key in seg.data, false);
+  }
   assert.equal(dataUri.data.openqq_media.width, 12);
   assert.deepEqual(text, { type: 'text', data: { text: 'keep me' } });
   assert.equal((await readdir(w.temp)).length, 2);
@@ -252,6 +255,7 @@ test('video needs a cover: an explicit thumb works, otherwise ffmpeg or a clear 
   const info = prepared.params.message[0].data.openqq_media;
   assert.deepEqual([info.kind, info.format, info.width, info.height, info.duration, info.name, info.path], ['video', 'mp4', 1280, 720, 5, 'clip.mp4', video]);
   assert.deepEqual([info.thumb.width, info.thumb.height, info.thumb.format], [320, 180, 'jpeg']);
+  for (const key of ['file', 'url', 'thumb', 'cover']) assert.equal(key in prepared.params.message[0].data, false);
   await prepared.release();
   assert.deepEqual(await readdir(w.temp), [], 'the generated cover is removed, the video is not copied');
 });

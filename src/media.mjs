@@ -429,7 +429,10 @@ export function createMediaPreparer({ dir, allowPrivate = process.env.OPENQQ_MED
           const { openqq_media: ignored, ...data } = segment.data;
           if (!mediaTypes.has(segment.type)) { message.push({ ...segment, data }); continue; }
           if (++count > 20) throw fail('一条消息最多包含 20 个媒体段');
-          message.push({ ...segment, data: { ...data, openqq_media: await builders[segment.type](data, track) } });
+          const prepared = await builders[segment.type](data, track);
+          // Native actions only consume openqq_media (and image summary); drop source fields so large base64:// payloads do not exceed the 1 MiB IPC frame limit.
+          const { file: _file, url: _url, thumb: _thumb, cover: _cover, ...rest } = data;
+          message.push({ ...segment, data: { ...rest, openqq_media: prepared } });
         }
         return { params: { ...params, message }, release };
       } catch (error) { await release(); throw error; }
