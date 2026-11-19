@@ -10,7 +10,7 @@ import nativeEvents from '../native/events.cjs';
 import sessionModule from '../native/session.cjs';
 import { createEventConverter } from '../src/onebot.mjs';
 import { createNativeChannel } from '../src/ipc.mjs';
-import { dispatchAction, redactActionRequest } from '../src/actions.mjs';
+import { dispatchAction, redactActionRequest, redactActionResponse } from '../src/actions.mjs';
 import { parseInput, startCommandInput } from '../src/input.mjs';
 import { startNativeFixture } from './native-support.mjs';
 
@@ -168,7 +168,7 @@ test('IPC rejects pre-connection actions and cancels an in-flight request on dis
   await assert.rejects(channel.request(send()), error => error.retcode === 1502);
   let submitted;
   const submittedPromise = new Promise(resolve => { submitted = resolve; });
-  const fixture = await startNativeFixture(t, {
+  await startNativeFixture(t, {
     channel,
     service: {
       generateMsgUniqueId: () => '9007199254740993',
@@ -180,7 +180,6 @@ test('IPC rejects pre-connection actions and cancels an in-flight request on dis
   await submittedPromise;
   await channel.close();
   await cancelled;
-  fixture.dispose();
 });
 
 test('terminal parser and line input preserve literal text, echo and continue after bad lines', async () => {
@@ -206,8 +205,7 @@ test('terminal parser and line input preserve literal text, echo and continue af
 test('authenticated IPC runs a text send and typing action end-to-end with a shared message ID', async t => {
   let sends = 0;
   let inputs = 0;
-  let fixture;
-  fixture = await startNativeFixture(t, {
+  const fixture = await startNativeFixture(t, {
     init: false,
     service: {
       generateMsgUniqueId: () => '9007199254740993',
@@ -272,18 +270,18 @@ test('get_image validates parameters, resolves received images via IPC and enric
   assert.equal(res.data.url, 'http://127.0.0.1:3001/openqq/media/id/cat.png');
 
   assert.equal(typeof nativeEvents.createEventReceiver, 'function');
-  fixture.dispose();
 });
 
 test('redactActionRequest replaces base64:// and data: URIs with size placeholders without mutating the request', () => {
   const payload = Buffer.alloc(1500).toString('base64');
+  const wrappedPayload = payload.match(/.{1,76}/g).join('\r\n');
   const original = {
     action: 'send_group_msg',
     params: {
       group_id: 987654,
       message: [
         { type: 'image', data: { file: 'base64://' + payload, summary: '[图]' } },
-        { type: 'video', data: { file: 'C:\\clip.mp4', thumb: 'data:image/png;base64,' + payload } },
+        { type: 'video', data: { file: 'C:\\clip.mp4', thumb: 'data:image/png;base64,' + wrappedPayload } },
         { type: 'text', data: { text: 'base64://' + payload } },
       ],
     },
@@ -298,10 +296,31 @@ test('redactActionRequest replaces base64:// and data: URIs with size placeholde
 
   const cq = redactActionRequest({
     action: 'send_msg',
-    params: { user_id: 654321, message: `hi[CQ:image,file=base64://${payload},summary=x][CQ:record,file=data:audio/wav;base64,${payload}]` },
+    params: {
+      user_id: 654321,
+      auto_escape: false,
+      message: `base64://AAAA hello [CQ:face,id=1][CQ:image,file=base64://${wrappedPayload},summary=x][CQ:record,file=data:audio/wav;base64&#44;${wrappedPayload}]`,
+    },
   });
-  assert.equal(cq.params.message, 'hi[CQ:image,file=base64://<1.5 KiB>,summary=x][CQ:record,file=data:audio/wav;base64,<1.5 KiB>]');
+  assert.equal(
+    cq.params.message,
+    'base64://AAAA hello [CQ:face,id=1][CQ:image,file=base64://<1.5 KiB>,summary=x][CQ:record,file=data:audio/wav;base64&#44;<1.5 KiB>]',
+  );
 
   const literal = { action: 'send_private_msg', params: { user_id: 654321, message: `[CQ:image,file=base64://${payload}]`, auto_escape: true } };
   assert.equal(redactActionRequest(literal), literal);
+});
+
+test('redactActionResponse replaces data.base64 with a size placeholder without mutating the response', () => {
+  const encoded = Buffer.alloc(1500).toString('base64');
+  const original = { status: 'ok', retcode: 0, data: { file: 'cat.png', size: 1500, base64: encoded } };
+  const redacted = redactActionResponse(original);
+  assert.equal(redacted.data.base64, '<1.5 KiB>');
+  assert.equal(redacted.data.file, 'cat.png');
+  assert.equal(original.data.base64, encoded);
+
+  const plain = { status: 'ok', retcode: 0, data: { message_id: 1 } };
+  assert.equal(redactActionResponse(plain), plain);
+  const failed = { status: 'failed', retcode: 1404, data: null, message: 'missing' };
+  assert.equal(redactActionResponse(failed), failed);
 });

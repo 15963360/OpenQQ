@@ -2,10 +2,10 @@ import { once } from 'node:events';
 import { createNativeChannel } from '../src/ipc.mjs';
 import sessionModule from '../native/session.cjs';
 
-export const defaultSelf = { uin: '123456', uid: 'u_self' };
+const defaultSelf = { uin: '123456', uid: 'u_self' };
 
 // Connects a mock QQ session to the real IPC channel and native hook for end-to-end action/media tests.
-export async function startNativeFixture(t, { self = defaultSelf, channel: existingChannel, init = true, service: serviceOverrides = {}, session: sessionOverrides = {} } = {}) {
+export async function startNativeFixture(t, { channel: existingChannel, init = true, service: serviceOverrides = {}, session: sessionOverrides = {} } = {}) {
   let channel = existingChannel;
   if (!channel) {
     channel = await createNativeChannel();
@@ -29,16 +29,13 @@ export async function startNativeFixture(t, { self = defaultSelf, channel: exist
   await connected;
   const initialize = async () => {
     const ready = new Promise(resolve => channel.events.on('event', event => { if (event.type === 'session_ready') resolve(); }));
-    facade.NodeIQQNTWrapperSession.get().init({ selfUin: self.uin, selfUid: self.uid }, {}, {}, {});
+    facade.NodeIQQNTWrapperSession.get().init({ selfUin: defaultSelf.uin, selfUid: defaultSelf.uid }, {}, {}, {});
     await ready;
   };
   if (init) await initialize();
   return {
-    self,
     channel,
-    facade,
     initialize,
     getListener: () => listener,
-    dispose: () => globalThis.__openqq_hook?.dispose(),
   };
 }

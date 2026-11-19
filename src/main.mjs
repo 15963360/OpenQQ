@@ -8,7 +8,7 @@ import { inspectQQ, resolveLinuxWrapper, bootstrapInput, verifiedVersions } from
 import { detectEnvironment, isQQProcessRunning, probeNative } from './env.mjs';
 import { createNativeChannel } from './ipc.mjs';
 import { createEventConverter } from './onebot.mjs';
-import { dispatchAction, redactActionRequest } from './actions.mjs';
+import { dispatchAction, recordAction, redactActionResponse } from './actions.mjs';
 import { createMediaPreparer } from './media.mjs';
 import { startCommandInput, inputHelp } from './input.mjs';
 import { createConsole } from './console.mjs';
@@ -90,16 +90,10 @@ async function start(qq, config, existingWebUI) {
   let webui;
   const execute = async (request, source) => {
     const started = performance.now();
-    // Summarize inline base64:// / data: payloads upfront so request is not pinned in memory during upload or streamed to WebUI.
-    const recorded = redactActionRequest(request);
-    const pending = dispatchAction(channel, convert, request, {
+    const response = await dispatchAction(channel, convert, request, {
       media, version: pkg.version, mediaUrl: (filePath, fileName) => network?.mediaUrl(filePath, fileName) ?? null,
     });
-    request = undefined;
-    const response = await pending;
-    webui?.publish('action', { request: recorded, response, source, elapsed: Math.round(performance.now() - started) });
-    // Terminal actions are printed by the input loop; external actions are mirrored here.
-    if (source !== 'terminal') out.action(recorded, response, source);
+    recordAction(webui, out, { request, response, source, elapsed: Math.round(performance.now() - started) });
     return response;
   };
   try {
@@ -199,7 +193,7 @@ async function start(qq, config, existingWebUI) {
   const input = startCommandInput({
     terminal, output: process.stdout, prompt: promptFor(out.paint, current),
     dispatch: request => execute(request, 'terminal'), onQuit: finish,
-    respond: (request, response) => out.action(request, response, 'terminal'),
+    respond: (request, response) => out.action(request, out.pretty ? redactActionResponse(response) : response, 'terminal'),
     help: () => out.help(inputHelp),
     local: {
       clear: () => { if (out.pretty) process.stdout.write('\x1b[2J\x1b[3J\x1b[H'); },

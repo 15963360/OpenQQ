@@ -75,9 +75,14 @@ test('CQ codes decode escapes, keep malformed codes as text and round-trip throu
 test('string messages are parsed as CQ code unless auto_escape is set', () => {
   const converted = nativeActions.normalizeParams({ action: 'send_group_msg', params: { group_id: 1, message: 'a &amp; b [CQ:at,qq=all]' } });
   assert.deepEqual(converted.params.message, [{ type: 'text', data: { text: 'a & b ' } }, { type: 'at', data: { qq: 'all' } }]);
+  const explicitFalse = nativeActions.normalizeParams({ action: 'send_group_msg', params: { group_id: 1, message: 'a [CQ:at,qq=all]', auto_escape: false } });
+  assert.deepEqual(explicitFalse.params.message, [{ type: 'text', data: { text: 'a ' } }, { type: 'at', data: { qq: 'all' } }]);
   const literal = { action: 'send_group_msg', params: { group_id: 1, message: '[CQ:at,qq=all]', auto_escape: true } };
   assert.equal(nativeActions.normalizeParams(literal), literal);
   assert.deepEqual(nativeActions.validateAction(literal).texts, ['[CQ:at,qq=all]']);
+  const nonBoolean = { action: 'send_group_msg', params: { group_id: 1, message: '[CQ:at,qq=all]', auto_escape: null } };
+  assert.equal(nativeActions.normalizeParams(nonBoolean), nonBoolean);
+  assert.throws(() => nativeActions.validateAction(nonBoolean), /auto_escape 必须为布尔值/);
   const array = { action: 'send_group_msg', params: { group_id: 1, message: [{ type: 'text', data: { text: 'x' } }] } };
   assert.equal(nativeActions.normalizeParams(array), array);
   assert.equal(nativeActions.normalizeParams({ action: 'get_status' }).action, 'get_status');
@@ -242,8 +247,7 @@ test('dispatchAction sends >1 MiB base64:// payloads across media types, CQ stri
   const temp = join(root, 'temp');
   let serial = 9007199254742000n;
   const sends = [];
-  let nativeFixture;
-  nativeFixture = await startNativeFixture(t, {
+  const nativeFixture = await startNativeFixture(t, {
     service: {
       generateMsgUniqueId: () => String(serial++),
       getRichMediaFilePathForGuild(request) { return join(root, 'QQ', String(request.elementType), request.md5HexStr + extname(request.fileName)); },
@@ -301,6 +305,11 @@ test('dispatchAction sends >1 MiB base64:// payloads across media types, CQ stri
       name: 'image CQ string via send_group_msg',
       request: group(`[CQ:image,file=${b64(pngBytes)},summary=&#91;CQ&#93;]`),
       verify: sent => { assert.equal(sent.peer.chatType, 2); assert.equal(sent.elements[0].picElement.fileSize, pngBytes.length); assert.equal(sent.elements[0].picElement.summary, '[CQ]'); },
+    },
+    {
+      name: 'image CQ string with auto_escape: false via send_group_msg',
+      request: { action: 'send_group_msg', params: { group_id: '555000', message: `[CQ:image,file=${b64(pngBytes)}]`, auto_escape: false } },
+      verify: sent => { assert.equal(sent.peer.chatType, 2); assert.equal(sent.elements[0].picElement.fileSize, pngBytes.length); },
     },
     {
       name: 'record via send_private_msg',
