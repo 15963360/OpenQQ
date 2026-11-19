@@ -8,7 +8,7 @@ import { inspectQQ, resolveLinuxWrapper, bootstrapInput, verifiedVersions } from
 import { detectEnvironment, isQQProcessRunning, probeNative } from './env.mjs';
 import { createNativeChannel } from './ipc.mjs';
 import { createEventConverter } from './onebot.mjs';
-import { dispatchAction } from './actions.mjs';
+import { dispatchAction, redactActionRequest } from './actions.mjs';
 import { createMediaPreparer } from './media.mjs';
 import { startCommandInput, inputHelp } from './input.mjs';
 import { createConsole } from './console.mjs';
@@ -90,12 +90,16 @@ async function start(qq, config, existingWebUI) {
   let webui;
   const execute = async (request, source) => {
     const started = performance.now();
-    const response = await dispatchAction(channel, convert, request, {
+    // Summarize inline base64:// / data: payloads upfront so request is not pinned in memory during upload or streamed to WebUI.
+    const recorded = redactActionRequest(request);
+    const pending = dispatchAction(channel, convert, request, {
       media, version: pkg.version, mediaUrl: (filePath, fileName) => network?.mediaUrl(filePath, fileName) ?? null,
     });
-    webui?.publish('action', { request, response, source, elapsed: Math.round(performance.now() - started) });
+    request = undefined;
+    const response = await pending;
+    webui?.publish('action', { request: recorded, response, source, elapsed: Math.round(performance.now() - started) });
     // Terminal actions are printed by the input loop; external actions are mirrored here.
-    if (source !== 'terminal') out.action(request, response, source);
+    if (source !== 'terminal') out.action(recorded, response, source);
     return response;
   };
   try {

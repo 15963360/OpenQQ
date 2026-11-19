@@ -4,15 +4,13 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
-import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import nativeActions from '../native/actions.cjs';
 import cq from '../native/cq.cjs';
-import sessionModule from '../native/session.cjs';
 import { createEventConverter } from '../src/onebot.mjs';
-import { createNativeChannel } from '../src/ipc.mjs';
 import { createMediaPreparer } from '../src/media.mjs';
 import { dispatchAction } from '../src/actions.mjs';
+import { startNativeFixture } from './native-support.mjs';
 
 const self = { uin: '123456', uid: 'u_self' };
 const md5 = bytes => createHash('md5').update(bytes).digest('hex');
@@ -238,52 +236,97 @@ test('dispatchAction normalizes CQ strings, prepares media, lengthens the IPC wa
   assert.equal(calls.length, 1);
 });
 
-test('dispatchAction sends a base64:// image larger than the 1 MiB IPC frame limit once media preparation strips source fields', async t => {
+test('dispatchAction sends >1 MiB base64:// payloads across media types, CQ strings and send actions', async t => {
   const root = await mkdtemp(join(tmpdir(), 'openqq-ipc-media-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const temp = join(root, 'temp');
-  const channel = await createNativeChannel();
-  t.after(() => channel.close());
-  let listener;
+  let serial = 9007199254742000n;
   const sends = [];
-  const service = {
-    addKernelMsgListener(value) { listener = value; return 1; },
-    removeKernelMsgListener() {},
-    generateMsgUniqueId: () => '9007199254740993',
-    getRichMediaFilePathForGuild(request) { return join(root, 'QQ', 'Pic', request.md5HexStr + extname(request.fileName)); },
-    async sendMsg(_id, peer, elements) {
-      sends.push({ peer, elements });
-      queueMicrotask(() => listener.onMsgInfoListUpdate([{ ...peer, senderUin: self.uin, sendStatus: 2, msgId: '9007199254742001' }]));
-      return { result: 0 };
+  let nativeFixture;
+  nativeFixture = await startNativeFixture(t, {
+    service: {
+      generateMsgUniqueId: () => String(serial++),
+      getRichMediaFilePathForGuild(request) { return join(root, 'QQ', String(request.elementType), request.md5HexStr + extname(request.fileName)); },
+      async sendMsg(_id, peer, elements) {
+        sends.push({ peer, elements });
+        const msgId = String(serial++);
+        queueMicrotask(() => nativeFixture.getListener().onMsgInfoListUpdate([{ ...peer, senderUin: self.uin, sendStatus: 2, msgId }]));
+        return { result: 0 };
+      },
     },
-  };
-  const session = {
-    init(_config, _a, _b, callbacks) { callbacks.onSessionInitComplete({ result: 0 }); },
-    getMsgService: () => service,
-    getMSFService: () => ({ getServerTime: () => '1794470400' }),
-  };
-  const connected = once(channel.events, 'connected');
-  const facade = sessionModule.startNative({ pipe: channel.path, token: channel.token }, { NodeIQQNTWrapperSession: { get: () => session } });
-  t.after(() => globalThis.__openqq_hook?.dispose());
-  await connected;
-  const ready = new Promise(resolve => channel.events.on('event', event => { if (event.type === 'session_ready') resolve(); }));
-  facade.NodeIQQNTWrapperSession.get().init({ selfUin: self.uin, selfUid: self.uid }, {}, {}, {});
-  await ready;
+    session: {
+      getUixConvertService: () => ({ getUid: async uins => ({ uidInfo: new Map(uins.map(uin => [uin, 'u_' + uin])) }) }),
+    },
+  });
 
-  const bigPng = Buffer.alloc(800 * 1024);
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bigPng);
-  bigPng.writeUInt32BE(13, 8); bigPng.write('IHDR', 12, 'latin1'); bigPng.writeUInt32BE(64, 16); bigPng.writeUInt32BE(32, 20);
-  bigPng[24] = 8; bigPng[25] = 6;
-  const base64 = bigPng.toString('base64');
-  assert.ok(Buffer.byteLength(base64) > 1024 * 1024);
+  const bigPng = (size = 800 * 1024) => {
+    const b = Buffer.alloc(size);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b);
+    b.writeUInt32BE(13, 8); b.write('IHDR', 12, 'latin1'); b.writeUInt32BE(64, 16); b.writeUInt32BE(32, 20);
+    b[24] = 8; b[25] = 6;
+    return b;
+  };
+  const bigSilk = () => Buffer.concat([Buffer.from('#!SILK_V3'), ...Array.from({ length: 40000 }, () => Buffer.from([20, 0, ...Buffer.alloc(20)])), Buffer.from([0xff, 0xff])]);
+  const box = (type, ...children) => {
+    const body = Buffer.concat(children);
+    const b = Buffer.alloc(8 + body.length);
+    b.writeUInt32BE(b.length, 0); b.write(type, 4, 'latin1'); body.copy(b, 8);
+    return b;
+  };
+  const bigMp4 = () => {
+    const tkhd = Buffer.alloc(84); tkhd.writeUInt32BE(1280 * 65536, 76); tkhd.writeUInt32BE(720 * 65536, 80);
+    const hdlr = Buffer.alloc(24); hdlr.write('vide', 8, 'latin1');
+    const mvhd = Buffer.alloc(100); mvhd.writeUInt32BE(1000, 12); mvhd.writeUInt32BE(5000, 16);
+    return Buffer.concat([box('ftyp', Buffer.from('isom'), Buffer.alloc(8)), box('mdat', Buffer.alloc(800 * 1024)), box('moov', box('mvhd', mvhd), box('trak', box('tkhd', tkhd), box('mdia', box('hdlr', hdlr))))]);
+  };
+
+  const pngBytes = bigPng();
+  const silkBytes = bigSilk();
+  const mp4Bytes = bigMp4();
+  const thumbBytes = bigPng();
+  const fileBytes = Buffer.alloc(800 * 1024, 0x41);
+  const b64 = buf => {
+    const encoded = buf.toString('base64');
+    assert.ok(Buffer.byteLength(encoded) > 1024 * 1024);
+    return 'base64://' + encoded;
+  };
+
+  const cases = [
+    {
+      name: 'image array via send_group_msg',
+      request: group([{ type: 'image', data: { file: b64(pngBytes), summary: '[大图]', extra: 'x'.repeat(100) } }]),
+      verify: sent => { assert.equal(sent.peer.chatType, 2); assert.equal(sent.elements[0].picElement.fileSize, pngBytes.length); assert.equal(sent.elements[0].picElement.summary, '[大图]'); },
+    },
+    {
+      name: 'image CQ string via send_group_msg',
+      request: group(`[CQ:image,file=${b64(pngBytes)},summary=&#91;CQ&#93;]`),
+      verify: sent => { assert.equal(sent.peer.chatType, 2); assert.equal(sent.elements[0].picElement.fileSize, pngBytes.length); assert.equal(sent.elements[0].picElement.summary, '[CQ]'); },
+    },
+    {
+      name: 'record via send_private_msg',
+      request: { action: 'send_private_msg', params: { user_id: '654321', message: [{ type: 'record', data: { file: b64(silkBytes) } }] } },
+      verify: sent => { assert.equal(sent.peer.chatType, 1); assert.equal(sent.elements[0].pttElement.fileSize, String(silkBytes.length)); },
+    },
+    {
+      name: 'video + thumb via send_msg (group)',
+      request: { action: 'send_msg', params: { group_id: '555000', message: [{ type: 'video', data: { file: b64(mp4Bytes), thumb: b64(thumbBytes), name: 'clip.mp4' } }] } },
+      verify: sent => { assert.equal(sent.peer.chatType, 2); assert.equal(sent.elements[0].videoElement.fileSize, String(mp4Bytes.length)); assert.equal(sent.elements[0].videoElement.thumbSize, thumbBytes.length); },
+    },
+    {
+      name: 'file via send_msg (private)',
+      request: { action: 'send_msg', params: { user_id: '654321', message: [{ type: 'file', data: { file: b64(fileBytes), name: 'report.bin' } }] } },
+      verify: sent => { assert.equal(sent.peer.chatType, 1); assert.equal(sent.elements[0].fileElement.fileName, 'report.bin'); assert.equal(sent.elements[0].fileElement.fileSize, String(fileBytes.length)); },
+    },
+  ];
 
   const converter = createEventConverter();
-  const response = await dispatchAction(channel, converter, group([{ type: 'image', data: { file: 'base64://' + base64, summary: '[大图]' } }]), {
-    media: createMediaPreparer({ dir: temp }),
-  });
-  assert.deepEqual(response, { status: 'ok', retcode: 0, data: { message_id: 1 } });
-  assert.equal(sends.length, 1);
-  assert.equal(sends[0].elements[0].picElement.fileSize, bigPng.length);
-  assert.equal(sends[0].elements[0].picElement.summary, '[大图]');
-  assert.deepEqual(await readdir(temp), [], 'temporary file created from base64 is released');
+  const preparer = createMediaPreparer({ dir: temp });
+  for (const item of cases) {
+    const before = sends.length;
+    const response = await dispatchAction(nativeFixture.channel, converter, item.request, { media: preparer });
+    assert.equal(response.status, 'ok', item.name);
+    assert.equal(sends.length, before + 1, item.name);
+    item.verify(sends[before]);
+    assert.deepEqual(await readdir(temp), [], item.name + ' releases temporary files');
+  }
 });

@@ -4,7 +4,65 @@ import nativeActions from '../native/actions.cjs';
 
 const fail = (message, retcode = 1400) => Object.assign(new Error(message), { retcode });
 const sendActions = ['send_private_msg', 'send_group_msg', 'send_msg'];
+const mediaSegmentTypes = new Set(['image', 'record', 'video', 'file']);
 const MAX_IMAGE_BASE64_BYTES = 16 * 1024 * 1024;
+
+const formatSize = bytes => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MiB` : bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KiB` : `${bytes} B`);
+
+function base64ByteLength(encoded) {
+  const clean = encoded.replace(/\s+/g, '');
+  const padding = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor(clean.length * 3 / 4) - padding);
+}
+
+function redactMediaValue(value) {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  const rawBase64 = trimmed.match(/^base64:\/\/([\s\S]+)$/i);
+  if (rawBase64) return `base64://<${formatSize(base64ByteLength(rawBase64[1]))}>`;
+  const dataBase64 = trimmed.match(/^(data:[^;,]*;base64(?:,|&#44;))([\s\S]+)$/i);
+  if (dataBase64) return `${dataBase64[1]}<${formatSize(base64ByteLength(dataBase64[2]))}>`;
+  const dataInline = trimmed.match(/^(data:[^,]*(?:,|&#44;))([\s\S]+)$/i);
+  if (dataInline) return `${dataInline[1]}<${formatSize(Buffer.byteLength(dataInline[2]))}>`;
+  return value;
+}
+
+function redactCqMedia(text) {
+  if (!text.includes('[CQ:')) return text;
+  return text.replace(/(base64:\/\/|data:[^,\];\s]+;base64(?:,|&#44;))([A-Za-z0-9+/=]+)/gi, (_full, prefix, encoded) => (
+    `${prefix}<${formatSize(base64ByteLength(encoded))}>`
+  ));
+}
+
+// Replaces inline base64:// and data: payloads with size placeholders so WebUI/terminal history never drops or bloats large sends.
+export function redactActionRequest(request) {
+  if (!request || typeof request !== 'object' || Array.isArray(request)) return request;
+  const params = request.params;
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return request;
+  if (typeof params.message === 'string') {
+    if (params.auto_escape) return request;
+    const message = redactCqMedia(params.message);
+    return message === params.message ? request : { ...request, params: { ...params, message } };
+  }
+  if (!Array.isArray(params.message)) return request;
+  let changed = false;
+  const message = params.message.map(segment => {
+    if (!segment || typeof segment !== 'object' || !mediaSegmentTypes.has(segment.type)) return segment;
+    const data = segment.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return segment;
+    let segmentChanged = false;
+    const next = {};
+    for (const [key, value] of Object.entries(data)) {
+      const redacted = redactMediaValue(value);
+      if (redacted !== value) segmentChanged = true;
+      next[key] = redacted;
+    }
+    if (!segmentChanged) return segment;
+    changed = true;
+    return { ...segment, data: next };
+  });
+  return changed ? { ...request, params: { ...params, message } } : request;
+}
 
 async function formatImageResult(data, mediaUrl) {
   const file = String(data?.file ?? '');
@@ -65,6 +123,7 @@ function localAnswer(request, options) {
 
 // `options.media` (see src/media.mjs) turns image / record / video / file segments into prepared local files.
 export async function dispatchAction(channel, converter, request, options = {}) {
+  const echo = request && Object.hasOwn(request, 'echo') ? { echo: request.echo } : {};
   let response;
   let release = async () => {};
   try {
@@ -73,13 +132,17 @@ export async function dispatchAction(channel, converter, request, options = {}) 
       response = { status: 'ok', retcode: 0, data: local };
     } else {
       let prepared = resolveReferences(converter, nativeActions.normalizeParams(request));
+      // Release caller's unredacted request before async media I/O or QQ upload waits.
+      request = undefined;
       if (options.media && sendActions.includes(prepared?.action) && prepared.params && typeof prepared.params === 'object') {
         const media = await options.media.prepare(prepared.params);
         prepared = { ...prepared, params: media.params };
         release = media.release;
       }
       const action = nativeActions.validateAction(prepared);
-      response = await channel.request(prepared, (action.timeout ?? 15000) + 5000);
+      const frame = prepared;
+      prepared = undefined;
+      response = await channel.request(frame, (action.timeout ?? 15000) + 5000);
       if (!response || !['ok', 'failed'].includes(response.status) || !Number.isSafeInteger(response.retcode)) throw new Error('原生动作回执无效');
       if (response.status === 'ok' && response.retcode !== 0) throw new Error('原生动作回执状态不一致');
       if (response.status === 'ok' && action.kind === 'send') {
@@ -97,5 +160,5 @@ export async function dispatchAction(channel, converter, request, options = {}) 
   } finally {
     await release();
   }
-  return { ...response, ...(request && Object.hasOwn(request, 'echo') ? { echo: request.echo } : {}) };
+  return { ...response, ...echo };
 }

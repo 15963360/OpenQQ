@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
 import { startWebUI } from '../src/webui.mjs';
+import { redactActionRequest } from '../src/actions.mjs';
 
 async function fixture(t, options = {}) {
   const web = await startWebUI({ port: 0, ...options });
@@ -168,4 +169,11 @@ test('console routes serve the page, fonts are local and /api/metrics reports th
   assert.deepEqual([total('events'), total('actions'), total('errors')], [1, 2, 1]);
   assert.deepEqual([metrics.latency.samples, metrics.latency.average, metrics.latency.last], [2, 21, 30]);
   assert.ok(metrics.process.rss > 0 && metrics.uptime >= 0);
+
+  const huge = { action: 'send_group_msg', params: { group_id: 987654, message: [{ type: 'image', data: { file: 'base64://' + Buffer.alloc(1887437).toString('base64') } }] } };
+  web.publish('action', { request: redactActionRequest(huge), response: { status: 'ok', retcode: 0, data: { message_id: 8 } }, source: 'onebot', elapsed: 40 });
+  const next = await stream(t, web, headers);
+  const published = (await next()).data.entries.at(-1);
+  assert.equal(published.data.request.params.message[0].data.file, 'base64://<1.8 MiB>');
+  assert.equal(published.data.response.data.message_id, 8);
 });
